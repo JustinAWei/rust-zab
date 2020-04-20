@@ -5,22 +5,29 @@ use std::collections::HashMap;
 fn main() {
     // create the node objects
     let mut nodes = Vec::new();
+    let N = 5;
 
     // leader
     nodes.push(Node {id: 0, leader: true, value: 0, tx: HashMap::new(), rx: HashMap::new()});
 
     // followers
-    for i in 1..5 {
+    for i in 1..N {
         nodes.push(Node {id: i, leader: false, value: 0, tx: HashMap::new(), rx: HashMap::new()});
     }
 
+    let mut handles = Vec::new();
     // start them up
     for mut node in nodes {
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             node.operate();
         });
+        handles.push(handle);
     }
 
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    
     // wait until we terminate the program
     println!("Hello, world!");
 }
