@@ -9,12 +9,24 @@ fn main() {
     let N = 5;
 
     // leader
-    nodes.push(Node::new(0));
+    nodes.push(Node::new(0, true));
 
     // followers
     for i in 1..N {
-        nodes.push(Node::new(i));
+        nodes.push(Node::new(i, false));
     }
+
+    // register tx channels for each node
+    for i in 0..N as usize {
+        for j in 0..N as usize {
+            if i != j {
+                let id = nodes[j].id;
+                let sx = nodes[j].sx.clone();
+                nodes[i].register(id, sx);
+            }
+        }
+    }
+
     // &rnodes[0].tx.insert(1, nodes[1].sx.clone());
 
     let mut handles = Vec::new();
@@ -45,15 +57,30 @@ struct Node {
 }
 
 impl Node {
-    fn new(i: i64, ) -> Node {
+    fn new(i: i64, isLeader: bool) -> Node {
         let (s, r) = channel();
-        Node {id: i, leader: false, value: 0, tx: HashMap::new(), sx: s, rx: r}
+        Node {id: i, leader: isLeader, value: 0, tx: HashMap::new(), sx: s, rx: r}
     }
+
+    fn register(&mut self, id: i64, tx: Sender<Message>) {
+        match self.tx.insert(id, tx) {
+            Some(v) => {
+                println!("Error in register! value already present {:?}", v);
+            },
+            None => {}
+        };
+    }
+
     fn send(&self, id:i64, msg: Message) {
+        println!("node {} sending {} to {}", self.id, msg.val, id);
         self.tx[&id].send(msg).unwrap();
+        //println!("send successful");
     }
     fn receive(&self) -> Message {
-        self.rx.recv().unwrap()
+        //println!("node {} receiving...", self.id);
+        let m = self.rx.recv().unwrap();
+        println!("node {} received {}", self.id, m.val);
+        m
     }
 
     fn process(&mut self, msg:Message) {
@@ -71,17 +98,33 @@ impl Node {
                 let ack = self.receive();
                 assert!(ack.val == self.value);
             }
+            println!("leader done!");
         } else {
             // follower
-            for i in 0..3 {
-                let msg = self.receive();
-                self.process(msg);
-                self.send(0, Message {val: self.value});
-            }
+            let msg = self.receive();
+            self.process(msg);
+            self.send(0, Message {val: self.value});
+            println!("follower done!");
         }
     }
 }
 
+enum MessageType {
+    FollowerInfo(i64, String),
+    Diff(i64),
+    Trunc(i64),
+    Snap(i64),
+    ObserverInfo(i64),
+    LeaderInfo(i64),
+    AckEpoch(i64),
+    NewLeader(i64),
+    UpToDate,
+    Proposal(i64),
+    Ack(i64),
+    Commit(i64),
+    Inform(i64),
+}
+
 struct Message {
-    val: i64
+    val: i64,
 }
