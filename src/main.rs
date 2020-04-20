@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
 use std::collections::HashMap;
 
@@ -8,11 +8,11 @@ fn main() {
     let N = 5;
 
     // leader
-    nodes.push(Node {id: 0, leader: true, value: 0, tx: HashMap::new(), rx: HashMap::new()});
+    nodes.push(Node::new(0));
 
     // followers
     for i in 1..N {
-        nodes.push(Node {id: i, leader: false, value: 0, tx: HashMap::new(), rx: HashMap::new()});
+        nodes.push(Node::new(i));
     }
 
     let mut handles = Vec::new();
@@ -27,7 +27,7 @@ fn main() {
     for handle in handles {
         handle.join().unwrap();
     }
-    
+
     // wait until we terminate the program
     println!("Hello, world!");
 }
@@ -38,15 +38,20 @@ struct Node {
     leader: bool,
     value: i64,
     tx: HashMap<i64, Sender<Message> >,
-    rx: HashMap<i64, Receiver<Message> >
+    sx: Sender<Message>,
+    rx: Receiver<Message>,
 }
 
 impl Node {
+    fn new(i: i64, ) -> Node {
+        let (s, r) = channel();
+        Node {id: i, leader: false, value: 0, tx: HashMap::new(), sx: s, rx: r}
+    }
     fn send(&self, id:i64, msg: Message) {
         self.tx[&id].send(msg).unwrap();
     }
-    fn receive(&self, id: i64) -> Message {
-        self.rx[&id].recv().unwrap()
+    fn receive(&self) -> Message {
+        self.rx.recv().unwrap()
     }
 
     fn process(&mut self, msg:Message) {
@@ -61,13 +66,13 @@ impl Node {
                 self.send(id, Message {val: self.value});
             }
             for id in 1..5 {
-                let ack = self.receive(id);
+                let ack = self.receive();
                 assert!(ack.val == self.value);
             }
         } else {
             // follower
             for i in 0..3 {
-                let msg = self.receive(0);
+                let msg = self.receive();
                 self.process(msg);
                 self.send(0, Message {val: self.value});
             }
