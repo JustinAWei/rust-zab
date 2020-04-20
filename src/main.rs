@@ -1,11 +1,26 @@
 use std::sync::mpsc::{Sender, Receiver};
-use std::sync::mpsc;
 use std::thread;
 use std::collections::HashMap;
 
 fn main() {
     // create the node objects
+    let mut nodes = Vec::new();
+
+    // leader
+    nodes.push(Node {id: 0, leader: true, value: 0, tx: HashMap::new(), rx: HashMap::new()});
+
+    // followers
+    for i in 1..5 {
+        nodes.push(Node {id: i, leader: false, value: 0, tx: HashMap::new(), rx: HashMap::new()});
+    }
+
     // start them up
+    for mut node in nodes {
+        thread::spawn(move || {
+            node.operate();
+        });
+    }
+
     // wait until we terminate the program
     println!("Hello, world!");
 }
