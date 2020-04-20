@@ -5,6 +5,7 @@ use std::collections::HashMap;
 fn main() {
     // create the node objects
     let mut nodes = Vec::new();
+    let rnodes = &nodes;
     let N = 5;
 
     // leader
@@ -14,6 +15,7 @@ fn main() {
     for i in 1..N {
         nodes.push(Node::new(i));
     }
+    // &rnodes[0].tx.insert(1, nodes[1].sx.clone());
 
     let mut handles = Vec::new();
     // start them up
@@ -59,13 +61,13 @@ impl Node {
     }
 
     fn operate(&mut self) {
-        if self.id == 0 {
+        if self.leader {
             // leader
             self.value += 1;
             for id in 1..5 {
                 self.send(id, Message {val: self.value});
             }
-            for id in 1..5 {
+            for _ in 1..5 {
                 let ack = self.receive();
                 assert!(ack.val == self.value);
             }
