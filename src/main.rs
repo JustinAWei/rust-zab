@@ -27,9 +27,8 @@ impl Node {
         self.rx[&id].recv().unwrap()
     }
 
-    fn process(&self, msg:Message) {
-        let val = msg.val;
-        println!("{}", val);
+    fn process(&mut self, msg:Message) {
+        self.value = msg.val;
     }
 
     fn operate(&mut self) {
@@ -41,13 +40,14 @@ impl Node {
             }
             for id in 1..5 {
                 let ack = self.receive(id);
-                assert!(ack.val == -1);
+                assert!(ack.val == self.value);
             }
         } else {
             // follower
             for i in 0..3 {
                 let msg = self.receive(0);
                 self.process(msg);
+                self.send(0, Message {val: self.value});
             }
         }
     }
