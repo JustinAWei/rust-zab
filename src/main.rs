@@ -146,7 +146,7 @@ impl Node {
                 let mut txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(),
-                    scheduler_handle: self.spawnTimeout(zxid)
+                    scheduler_handle: self.spawn_timeout(zxid)
                 };
                 txn.ack_ids.insert(self.id);
 
@@ -218,7 +218,7 @@ impl Node {
                 let txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(), // TODO null?
-                    scheduler_handle: self.spawnTimeout(zxid)
+                    scheduler_handle: self.spawn_timeout(zxid)
                 };
                 self.inflight_txns.insert(zxid, txn);
 
@@ -260,7 +260,7 @@ impl Node {
         */
     }
 
-    fn spawnTimeout(&self, zxid: i64) -> timer::Guard {
+    fn spawn_timeout(&self, zxid: i64) -> timer::Guard {
         self.msg_thread.schedule_with_delay(
             chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
             Message {
