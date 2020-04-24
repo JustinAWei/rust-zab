@@ -43,7 +43,9 @@ fn main() {
         sender_id: 0,
         msg_type: MessageType::ClientProposal(String::from("suhh")),
     };
-    leader_channel.send(proposal).expect("nahh");
+    for _ in 0..5 {
+        leader_channel.send(proposal.clone()).expect("nahh");
+    }
 
     for handle in handles {
         handle.join().unwrap();
@@ -172,6 +174,10 @@ impl Node {
                 };
 
                 if quorum_ack {
+                    if zxid != self.committed_zxid + 1 {
+                        panic!("leader missed a zxid");
+                        // return;
+                    }
                     match self.inflight_txns.remove(&zxid) {
                         Some(t) => {
                             // handle quorum
@@ -185,7 +191,7 @@ impl Node {
                                     self.send(id, send_msg.clone());
                                 }
                             }
-                            // TODO: where??
+                            // TODO: where do we record??
                             self.record_commit(zxid, t.data.clone());
                             self.committed_zxid = zxid;
                         },
@@ -204,8 +210,8 @@ impl Node {
         match msg.msg_type {
             MessageType::Proposal(zxid, data) => {
                 if zxid != self.next_zxid {
-                    // TODO clean up
                     println!("follower missed a zxid");
+                    return;
                 }
                 self.next_zxid += 1;
 
@@ -214,7 +220,6 @@ impl Node {
                     ack_ids: HashSet::new(), // TODO null?
                     scheduler_handle: self.spawnTimeout(zxid)
                 };
-                // TODO: check for dupes? ensure sequential?
                 self.inflight_txns.insert(zxid, txn);
 
                 // send ACK(zxid) to the great leader.
@@ -228,8 +233,8 @@ impl Node {
             },
             MessageType::Commit(zxid) => {
                 if zxid != self.committed_zxid + 1 {
-                    // TODO clean up
                     println!("follower missed a zxid");
+                    return;
                 }
 
                 match self.inflight_txns.remove(&zxid) {
