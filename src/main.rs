@@ -59,7 +59,7 @@ struct Node {
     quorum_size: usize,
     leader: bool,
     committed_zxid: i64,
-    latest_zxid: i64,
+    next_zxid: i64,
     tx: HashMap<usize, Sender<Message>>,
     sx: Sender<Message>,
     rx: Receiver<Message>,
@@ -78,7 +78,7 @@ impl Node {
             quorum_size: (cluster_size + 1) / 2,
             leader: is_leader,
             committed_zxid: 0,
-            latest_zxid: 0,
+            next_zxid: 1,
             tx: HashMap::new(),
             sx: s.clone(),
             rx: r,
@@ -124,7 +124,8 @@ impl Node {
     fn process_leader(&mut self, msg: Message) {
         match msg.msg_type {
             MessageType::ClientProposal(data) => {
-                self.latest_zxid += 1;
+                let zxid = self.next_zxid;
+                self.next_zxid += 1;
 
                 // spawn timeout
                 let msg_handle = self.msg_thread.schedule_with_delay(
@@ -132,7 +133,7 @@ impl Node {
                     Message {
                         sender_id: self.id,
                         msg_type: MessageType::LeaderInternalTimeout(
-                            self.latest_zxid
+                            zxid
                         )
                     }
                 );
@@ -142,10 +143,10 @@ impl Node {
                     ack_ids: HashSet::new(),
                     scheduler_handle: msg_handle
                 };
-                self.inflight_txns.insert(self.latest_zxid, txn);
+                self.inflight_txns.insert(zxid, txn);
                 let send_msg = Message {
                     sender_id: self.id,
-                    msg_type: MessageType::Proposal(self.latest_zxid, data),
+                    msg_type: MessageType::Proposal(zxid, data),
                 };
                 for id in 0..self.cluster_size {
                     if id != self.id {
