@@ -1,6 +1,9 @@
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
 use std::collections::{HashSet, HashMap};
+extern crate timer;
+extern crate chrono;
+const TXN_TIMEOUT_MS : i64 = 400;
 
 fn main() {
     // create the node objects
@@ -49,6 +52,7 @@ fn main() {
 struct InflightTxn {
     data: String,
     ack_ids: HashSet<usize>,
+    scheduler_handle: timer::Guard
 }
 
 // node
@@ -64,6 +68,7 @@ struct Node {
     rx: Receiver<Message>,
     txn_log: Vec<(i64, String)>,
     inflight_txns: HashMap<i64, InflightTxn>,
+    msg_thread: timer::MessageTimer<Message>,
 }
 
 impl Node {
@@ -78,10 +83,11 @@ impl Node {
             committed_zxid: 0,
             latest_zxid: 0,
             tx: HashMap::new(),
-            sx: s,
+            sx: s.clone(),
             rx: r,
             txn_log: Vec::new(),
             inflight_txns: HashMap::new(),
+            msg_thread: timer::MessageTimer::new(s)
         }
     }
 
@@ -122,31 +128,65 @@ impl Node {
         match msg.msg_type {
             MessageType::ClientProposal(data) => {
                 self.latest_zxid += 1;
+
+                // spawn timeout
+                let msg_handle = self.msg_thread.schedule_with_delay(
+                    chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
+                    Message {
+                        sender_id: self.id,
+                        msg_type: MessageType::LeaderInternalTimeout(
+                            self.latest_zxid
+                        )
+                    }
+                );
+
                 let txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(),
+                    scheduler_handle: msg_handle
                 };
                 self.inflight_txns.insert(self.latest_zxid, txn);
                 let send_msg = Message {
                     sender_id: self.id,
                     msg_type: MessageType::Proposal(self.latest_zxid, data),
                 };
-                for id in 1..self.cluster_size {
-                    self.send(id, send_msg.clone());
+                for id in 0..self.cluster_size {
+                    if id != self.id {
+                        self.send(id, send_msg.clone());
+                    }
                 }
-                // TODO: spawn timeout
             },
             MessageType::Ack(zxid) => {
+                let mut quorum_ack : bool = false;
                 match self.inflight_txns.get_mut(&zxid) {
                     Some(t) => {
                         t.ack_ids.insert(msg.sender_id);
                         if t.ack_ids.len() >= self.quorum_size {
-                            // TODO handle quorum
-                            println!("quorum!");
+                            quorum_ack = true
                         }
                     },
                     None => {},
                 };
+
+                if quorum_ack {
+                    match self.inflight_txns.remove(&zxid) {
+                        Some(t) => {
+                            // handle quorum
+                            // we can first send to followers before writing in our own logs
+                            let send_msg = Message {
+                                sender_id: self.id,
+                                msg_type: MessageType::Commit(zxid),
+                            };
+                            for id in 0..self.cluster_size {
+                                if id != self.id {
+                                    self.send(id, send_msg.clone());
+                                }
+                            }
+                            self.record_txn(zxid, t.data.clone());
+                        },
+                        None => {}
+                    }
+                }
             },
             _ => {
                 println!("Unsupported msg type for leader");
@@ -189,6 +229,7 @@ enum MessageType {
     //
     // Our message types
     ClientProposal(String),
+    LeaderInternalTimeout(i64) // zxid of timed out transaction
 }
 
 #[derive(Clone, Debug)]
