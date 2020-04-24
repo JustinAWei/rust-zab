@@ -1,6 +1,11 @@
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
 use std::collections::{HashSet, HashMap};
+// extern crate serde;
+extern crate serde_json;
+use std::fs::File;
+use std::io::prelude::*;
+
 extern crate timer;
 extern crate chrono;
 const TXN_TIMEOUT_MS : i64 = 400;
@@ -61,6 +66,46 @@ struct InflightTxn {
     scheduler_handle: timer::Guard
 }
 
+struct ZabLog {
+    commit_log: Vec<(i64, String)>, // TODO: timestamp?
+    proposal_log: Vec<(i64, String)>, // TODO: timestamp?
+    lf: File,
+}
+
+impl ZabLog {
+    fn new(i: i64) -> ZabLog {
+        let fpath = "./log".to_string() + &i.to_string();
+        ZabLog {
+            commit_log: Vec::new(),
+            proposal_log: Vec::new(),
+            lf: File::create(fpath).unwrap() // create a file
+        }
+    }
+
+    fn record_proposal(&mut self, zxid: i64, data: String) {
+        self.proposal_log.push((zxid, data.clone()));
+
+        let entry = ("p", zxid, data);
+        // append to file
+        serde_json::to_writer(&mut self.lf, &entry).unwrap();
+        writeln!(&mut self.lf).unwrap();
+        self.lf.flush().unwrap();
+
+    }
+
+    fn record_commit(&mut self, zxid: i64, data: String) {
+        self.commit_log.push((zxid, data.clone()));
+        let entry = ("c", zxid, data);
+
+        // append to file
+        serde_json::to_writer(&mut self.lf, &entry).unwrap();
+        writeln!(&mut self.lf).unwrap();
+        self.lf.flush().unwrap();
+
+    }
+}
+
+
 // node
 struct Node {
     id: usize,
@@ -72,8 +117,7 @@ struct Node {
     tx: HashMap<usize, Sender<Message>>,
     sx: Sender<Message>,
     rx: Receiver<Message>,
-    commit_log: Vec<(i64, String)>, // TODO: timestamp?
-    proposal_log: Vec<(i64, String)>, // TODO: timestamp?
+    zab_log: ZabLog,
     inflight_txns: HashMap<i64, InflightTxn>,
     msg_thread: timer::MessageTimer<Message>,
 }
@@ -92,10 +136,9 @@ impl Node {
             tx: HashMap::new(),
             sx: s.clone(),
             rx: r,
-            commit_log: Vec::new(),
-            proposal_log: Vec::new(),
             inflight_txns: HashMap::new(),
-            msg_thread: timer::MessageTimer::new(s)
+            msg_thread: timer::MessageTimer::new(s),
+            zab_log: ZabLog::new(i as i64)
         }
     }
 
@@ -120,14 +163,6 @@ impl Node {
         m
     }
 
-    fn record_proposal(&mut self, zxid: i64, data: String) {
-        self.proposal_log.push((zxid, data));
-    }
-
-    fn record_commit(&mut self, zxid: i64, data: String) {
-        self.commit_log.push((zxid, data));
-    }
-
     fn process(&mut self, msg:Message) {
         if self.leader {
             self.process_leader(msg);
@@ -141,7 +176,7 @@ impl Node {
             MessageType::ClientProposal(data) => {
                 let zxid = self.next_zxid;
                 self.next_zxid += 1;
-                self.record_proposal(zxid, data.clone()); // TODO: beginning or end of msg handler?
+                self.zab_log.record_proposal(zxid, data.clone()); // TODO: beginning or end of msg handler?
 
                 let mut txn = InflightTxn {
                     data: data.clone(),
@@ -192,7 +227,7 @@ impl Node {
                                 }
                             }
                             // TODO: where do we record??
-                            self.record_commit(zxid, t.data.clone());
+                            self.zab_log.record_commit(zxid, t.data.clone());
                             self.committed_zxid = zxid;
                         },
                         None => {}
@@ -229,7 +264,7 @@ impl Node {
                 };
                 self.send(leader_id, ack);
 
-                self.record_proposal(zxid, data);
+                self.zab_log.record_proposal(zxid, data);
             },
             MessageType::Commit(zxid) => {
                 if zxid != self.committed_zxid + 1 {
@@ -239,7 +274,7 @@ impl Node {
 
                 match self.inflight_txns.remove(&zxid) {
                     Some(t) => {
-                        self.record_commit(zxid, t.data.clone());
+                        self.zab_log.record_commit(zxid, t.data.clone());
                         self.committed_zxid = zxid;
                     },
                     None => {}
