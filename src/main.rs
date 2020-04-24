@@ -12,6 +12,7 @@ fn main() {
 
     // leader
     nodes.push(Node::new(0, n, true));
+    let leader_channel = nodes[0].sx.clone();
 
     // followers
     for i in 1..n {
@@ -37,6 +38,12 @@ fn main() {
         });
         handles.push(handle);
     }
+
+    let proposal = Message {
+        sender_id: 0,
+        msg_type: MessageType::ClientProposal(String::from("suhh")),
+    };
+    leader_channel.send(proposal).expect("nahh");
 
     for handle in handles {
         handle.join().unwrap();
@@ -134,14 +141,13 @@ impl Node {
                 self.next_zxid += 1;
                 self.record_proposal(zxid, data.clone()); // TODO: beginning or end of msg handler?
 
-                // spawn timeout
-
-
-                let txn = InflightTxn {
+                let mut txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(),
                     scheduler_handle: self.spawnTimeout(zxid)
                 };
+                txn.ack_ids.insert(self.id);
+
                 self.inflight_txns.insert(zxid, txn);
                 let send_msg = Message {
                     sender_id: self.id,
@@ -202,9 +208,6 @@ impl Node {
                     println!("follower missed a zxid");
                 }
                 self.next_zxid += 1;
-
-                // TODO: reduce code reuse b/w leader and follower?
-                // spawn timeout
 
                 let txn = InflightTxn {
                     data: data.clone(),
