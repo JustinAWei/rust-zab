@@ -205,8 +205,32 @@ impl Node {
         let leader_id = msg.sender_id;
         match msg.msg_type {
             MessageType::Proposal(zxid, data) => {
-                // log and sync proposals to disk
-                self.record_commit(zxid, data);
+                if zxid != self.next_zxid {
+                    // TODO clean up
+                    println!("follower missed a zxid");
+                }
+                self.next_zxid += 1;
+
+                // TODO: reduce code reuse b/w leader and follower?
+                // spawn timeout
+                let msg_handle = self.msg_thread.schedule_with_delay(
+                    chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
+                    Message {
+                        sender_id: self.id,
+                        // TODO handle this message
+                        msg_type: MessageType::InternalTimeout(
+                            zxid
+                        )
+                    }
+                );
+
+                let txn = InflightTxn {
+                    data: data.clone(),
+                    ack_ids: HashSet::new(), // TODO null?
+                    scheduler_handle: msg_handle
+                };
+                // TODO: check for dupes? ensure sequential?
+                self.inflight_txns.insert(zxid, txn);
 
                 // send ACK(zxid) to the great leader.
                 let ack = Message {
@@ -215,6 +239,21 @@ impl Node {
                 };
                 self.send(leader_id, ack);
 
+                self.record_proposal(zxid, data);
+            },
+            MessageType::Commit(zxid) => {
+                if zxid != self.committed_zxid + 1 {
+                    // TODO clean up
+                    println!("follower missed a zxid");
+                }
+
+                match self.inflight_txns.remove(&zxid) {
+                    Some(t) => {
+                        self.record_commit(zxid, t.data.clone());
+                        self.committed_zxid = zxid;
+                    },
+                    None => {}
+                }
             },
             _ => {
                 println!("Unsupported msg type for follower");
