@@ -135,21 +135,12 @@ impl Node {
                 self.record_proposal(zxid, data.clone()); // TODO: beginning or end of msg handler?
 
                 // spawn timeout
-                let msg_handle = self.msg_thread.schedule_with_delay(
-                    chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
-                    Message {
-                        sender_id: self.id,
-                        // TODO handle this message
-                        msg_type: MessageType::InternalTimeout(
-                            zxid
-                        )
-                    }
-                );
+
 
                 let txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(),
-                    scheduler_handle: msg_handle
+                    scheduler_handle: self.spawnTimeout(zxid)
                 };
                 self.inflight_txns.insert(zxid, txn);
                 let send_msg = Message {
@@ -188,6 +179,7 @@ impl Node {
                                     self.send(id, send_msg.clone());
                                 }
                             }
+                            // TODO: where??
                             self.record_commit(zxid, t.data.clone());
                             self.committed_zxid = zxid;
                         },
@@ -213,21 +205,11 @@ impl Node {
 
                 // TODO: reduce code reuse b/w leader and follower?
                 // spawn timeout
-                let msg_handle = self.msg_thread.schedule_with_delay(
-                    chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
-                    Message {
-                        sender_id: self.id,
-                        // TODO handle this message
-                        msg_type: MessageType::InternalTimeout(
-                            zxid
-                        )
-                    }
-                );
 
                 let txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(), // TODO null?
-                    scheduler_handle: msg_handle
+                    scheduler_handle: self.spawnTimeout(zxid)
                 };
                 // TODO: check for dupes? ensure sequential?
                 self.inflight_txns.insert(zxid, txn);
@@ -269,6 +251,20 @@ impl Node {
         /*
         */
     }
+
+    fn spawnTimeout(&self, zxid: i64) -> timer::Guard {
+        self.msg_thread.schedule_with_delay(
+            chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
+            Message {
+                sender_id: self.id,
+                // TODO handle this message
+                msg_type: MessageType::InternalTimeout(
+                    zxid
+                )
+            }
+        )
+    }
+    
 }
 
 #[derive(Clone, Debug)]
