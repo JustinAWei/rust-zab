@@ -8,20 +8,19 @@ const TXN_TIMEOUT_MS : i64 = 400;
 fn main() {
     // create the node objects
     let mut nodes = Vec::new();
-    let rnodes = &nodes;
-    let N: usize = 5;
+    let n: usize = 5;
 
     // leader
-    nodes.push(Node::new(0, N, true));
+    nodes.push(Node::new(0, n, true));
 
     // followers
-    for i in 1..N {
-        nodes.push(Node::new(i, N, false));
+    for i in 1..n {
+        nodes.push(Node::new(i, n, false));
     }
 
     // register tx channels for each node
-    for i in 0..N as usize {
-        for j in 0..N as usize {
+    for i in 0..n as usize {
+        for j in 0..n as usize {
             if i != j {
                 let id = nodes[j].id;
                 let sx = nodes[j].sx.clone();
@@ -29,8 +28,6 @@ fn main() {
             }
         }
     }
-
-    // &rnodes[0].tx.insert(1, nodes[1].sx.clone());
 
     let mut handles = Vec::new();
     // start them up
@@ -216,7 +213,7 @@ impl Node {
     }
 
     fn main_loop(&mut self) {
-        while true {
+        loop {
             let msg = self.receive();
             self.process(msg);
         }
