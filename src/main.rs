@@ -195,7 +195,24 @@ impl Node {
     }
 
     fn process_follower(&mut self, msg: Message) {
-        // TODO this
+        let leader_id = msg.sender_id;
+        match msg.msg_type {
+            MessageType::Proposal(zxid, data) => {
+                // log and sync proposals to disk
+                self.txn_log.push((zxid as i64, data));
+
+                // send ACK(zxid) to the great leader.
+                let ack = Message {
+                    sender_id: self.id,
+                    msg_type: MessageType::Ack(zxid)
+                };
+                self.send(leader_id, ack);
+
+            },
+            _ => {
+                println!("Unsupported msg type for follower");
+            }
+        }
     }
 
     fn main_loop(&mut self) {
