@@ -139,7 +139,8 @@ impl Node {
                     chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
                     Message {
                         sender_id: self.id,
-                        msg_type: MessageType::LeaderInternalTimeout(
+                        // TODO handle this message
+                        msg_type: MessageType::InternalTimeout(
                             zxid
                         )
                     }
@@ -251,7 +252,7 @@ enum MessageType {
     //
     // Our message types
     ClientProposal(String),
-    LeaderInternalTimeout(i64) // zxid of timed out transaction
+    InternalTimeout(i64) // zxid of timed out transaction
 }
 
 #[derive(Clone, Debug)]
