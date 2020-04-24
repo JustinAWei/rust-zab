@@ -63,7 +63,8 @@ struct Node {
     tx: HashMap<usize, Sender<Message>>,
     sx: Sender<Message>,
     rx: Receiver<Message>,
-    txn_log: Vec<(i64, String)>,
+    commit_log: Vec<(i64, String)>, // TODO: timestamp?
+    proposal_log: Vec<(i64, String)>, // TODO: timestamp?
     inflight_txns: HashMap<i64, InflightTxn>,
     msg_thread: timer::MessageTimer<Message>,
 }
@@ -82,7 +83,8 @@ impl Node {
             tx: HashMap::new(),
             sx: s.clone(),
             rx: r,
-            txn_log: Vec::new(),
+            commit_log: Vec::new(),
+            proposal_log: Vec::new(),
             inflight_txns: HashMap::new(),
             msg_thread: timer::MessageTimer::new(s)
         }
@@ -109,8 +111,12 @@ impl Node {
         m
     }
 
-    fn record_txn(&mut self, zxid: i64, data: String) {
-        self.txn_log.push((zxid, data));
+    fn record_proposal(&mut self, zxid: i64, data: String) {
+        self.proposal_log.push((zxid, data));
+    }
+
+    fn record_commit(&mut self, zxid: i64, data: String) {
+        self.commit_log.push((zxid, data));
     }
 
     fn process(&mut self, msg:Message) {
@@ -126,6 +132,7 @@ impl Node {
             MessageType::ClientProposal(data) => {
                 let zxid = self.next_zxid;
                 self.next_zxid += 1;
+                self.record_proposal(zxid, data.clone()); // TODO: beginning or end of msg handler?
 
                 // spawn timeout
                 let msg_handle = self.msg_thread.schedule_with_delay(
@@ -180,7 +187,7 @@ impl Node {
                                     self.send(id, send_msg.clone());
                                 }
                             }
-                            self.record_txn(zxid, t.data.clone());
+                            self.record_commit(zxid, t.data.clone());
                         },
                         None => {}
                     }
@@ -197,7 +204,7 @@ impl Node {
         match msg.msg_type {
             MessageType::Proposal(zxid, data) => {
                 // log and sync proposals to disk
-                self.txn_log.push((zxid as i64, data));
+                self.record_commit(zxid, data);
 
                 // send ACK(zxid) to the great leader.
                 let ack = Message {
