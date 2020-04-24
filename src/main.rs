@@ -189,6 +189,7 @@ impl Node {
                                 }
                             }
                             self.record_commit(zxid, t.data.clone());
+                            self.committed_zxid = zxid;
                         },
                         None => {}
                     }
