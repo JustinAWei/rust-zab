@@ -6,6 +6,9 @@ extern crate serde_json;
 use std::fs::File;
 use std::io::prelude::*;
 
+mod message;
+
+use message::{MessageType, Message, NodeState};
 extern crate timer;
 extern crate chrono;
 const TXN_TIMEOUT_MS : i64 = 400;
@@ -111,6 +114,7 @@ struct Node {
     id: usize,
     cluster_size: usize,
     quorum_size: usize,
+    state: NodeState,
     leader: bool,
     committed_zxid: i64,
     next_zxid: i64,
@@ -130,6 +134,7 @@ impl Node {
             id: i,
             cluster_size: cluster_size,
             quorum_size: (cluster_size + 1) / 2,
+            state: NodeState::Looking,
             leader: is_leader,
             committed_zxid: 0,
             next_zxid: 1,
@@ -308,34 +313,4 @@ impl Node {
         )
     }
     
-}
-
-#[derive(Clone, Debug)]
-enum MessageType {
-    // Zab message types
-    /*
-    FollowerInfo(i64, String),
-    Diff(i64),
-    Trunc(i64),
-    Snap(i64),
-    ObserverInfo(i64),
-    LeaderInfo(i64),
-    AckEpoch(i64),
-    NewLeader(i64),
-    UpToDate,
-    */
-    Proposal(i64, String),
-    Ack(i64),
-    Commit(i64),
-    // Inform(i64),
-    //
-    // Our message types
-    ClientProposal(String),
-    InternalTimeout(i64) // zxid of timed out transaction
-}
-
-#[derive(Clone, Debug)]
-struct Message {
-    sender_id: usize,
-    msg_type: MessageType,
 }
