@@ -34,7 +34,7 @@ fn is_candidate_better(my_vote : &Vote, new_vote : &Vote,) -> bool {
     }
     return false
 }
-
+// look_for_leader();
 impl LeaderElector {
     // fn new() {}
 
@@ -72,20 +72,50 @@ impl LeaderElector {
 
             match vote.sender_state {
                 NodeState::Looking => {
+                    
                     // our election is outdated, start again
                     if vote.election_epoch > self.election_epoch {
                         self.election_epoch = vote.election_epoch;
                         return;
                     }
                     
-                    if vote.election_epoch == self.election_epoch && is_candidate_better(&my_vote, &vote)
+                    if vote.election_epoch == self.election_epoch
                     {
-                        // TODO: send my_vote to all peers
-                        let vote_msg = Message {
-                            sender_id: self.id,
-                            msg_type: Vote(my_vote),
-                        };
-                        // TODO: evaluate if there is yet a quorum voting for the same leader
+                        recv_set.insert(vote.sender_id, vote.clone());
+
+                        if is_candidate_better(&my_vote, &vote) {
+                            my_vote = vote.clone();
+                            my_vote.sender_id = self.id;
+
+                            // send my_vote to all peers
+                            let vote_msg = Message {
+                                sender_id: self.id,
+                                msg_type: MessageType::Vote(my_vote),
+                            };
+                            self.broadcast(tx, vote_msg);
+
+                            // TODO: evaluate if there is yet a quorum voting for the same leader
+                            let mut counts : HashMap<u64, u64> = HashMap::new();
+
+                            for (_, v) in &recv_set {
+                                let candidate_id = v.leader;
+                                *counts.entry(candidate_id).or_insert(0) += 1;
+                            }
+
+                            let mut new_leader = 0;
+                            let highest_votes = 0;
+                            for (candidate, count) in counts {
+                                if highest_votes < count {
+                                    new_leader = candidate;
+                                }
+                            }
+
+                            // quorum check
+                            let num_nodes = 4;
+                            if highest_votes >= num_nodes / 2 {
+                                // new leader is elected
+                            }
+                            }
                     } else {continue;}
 
                 }
@@ -103,9 +133,9 @@ impl LeaderElector {
         }
     }
 
-    fn broadcast(tx : & mut HashMap<usize, Sender<Message>>, msg : Message) {
+    fn broadcast(&self, tx : & mut HashMap<u64, Sender<Message>>, msg : Message) {
         for (_, s) in tx {
-            s.send(msg);
+            s.send(msg.clone());
         }
     }
     
