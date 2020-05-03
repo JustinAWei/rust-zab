@@ -42,7 +42,7 @@ impl LeaderElector {
     pub fn look_for_leader(
         & mut self,
         rx : & mut Receiver<Message>,
-        tx : & mut HashMap<usize, Sender<Message>>,
+        tx : & mut HashMap<u64, Sender<Message>>,
         zab_epoch : u64,
         last_zxid : u64)
     {

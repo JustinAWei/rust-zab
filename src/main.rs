@@ -16,7 +16,7 @@ const TXN_TIMEOUT_MS : i64 = 400;
 fn main() {
     // create the node objects
     let mut nodes = Vec::new();
-    let n: usize = 5;
+    let n: u64 = 5;
 
     // leader
     nodes.push(Node::new(0, n, true));
@@ -65,7 +65,7 @@ fn main() {
 
 struct InflightTxn {
     data: String,
-    ack_ids: HashSet<usize>,
+    ack_ids: HashSet<u64>,
     scheduler_handle: timer::Guard
 }
 
@@ -111,14 +111,14 @@ impl ZabLog {
 
 // node
 struct Node {
-    id: usize,
-    cluster_size: usize,
-    quorum_size: usize,
+    id: u64,
+    cluster_size: u64,
+    quorum_size: u64,
     state: NodeState,
     leader: bool,
     committed_zxid: i64,
     next_zxid: i64,
-    tx: HashMap<usize, Sender<Message>>,
+    tx: HashMap<u64, Sender<Message>>,
     sx: Sender<Message>,
     rx: Receiver<Message>,
     zab_log: ZabLog,
@@ -127,7 +127,7 @@ struct Node {
 }
 
 impl Node {
-    fn new(i: usize, cluster_size: usize, is_leader: bool) -> Node {
+    fn new(i: u64, cluster_size: u64, is_leader: bool) -> Node {
         assert!(cluster_size % 2 == 1);
         let (s, r) = channel();
         Node {
@@ -147,7 +147,7 @@ impl Node {
         }
     }
 
-    fn register(&mut self, id: usize, tx: Sender<Message>) {
+    fn register(&mut self, id: u64, tx: Sender<Message>) {
         match self.tx.insert(id, tx) {
             Some(v) => {
                 println!("Error in register! value already present {:?}", v);
@@ -156,7 +156,7 @@ impl Node {
         };
     }
 
-    fn send(&self, id: usize, msg: Message) {
+    fn send(&self, id: u64, msg: Message) {
         println!("node {} sending {:?} to {}", self.id, msg, id);
         self.tx[&id].send(msg).unwrap();
         //println!("send successful");
@@ -206,7 +206,7 @@ impl Node {
                 match self.inflight_txns.get_mut(&zxid) {
                     Some(t) => {
                         t.ack_ids.insert(msg.sender_id);
-                        if t.ack_ids.len() >= self.quorum_size {
+                        if t.ack_ids.len() as u64 >= self.quorum_size {
                             quorum_ack = true
                         }
                     },

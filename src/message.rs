@@ -58,6 +58,6 @@ pub enum MessageType {
 
 #[derive(Clone, Debug)]
 pub struct Message {
-    pub sender_id: usize,
+    pub sender_id: u64,
     pub msg_type: MessageType,
 }
