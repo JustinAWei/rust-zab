@@ -34,7 +34,6 @@ fn is_candidate_better(my_vote : &Vote, new_vote : &Vote,) -> bool {
     }
     return false
 }
-// look_for_leader();
 impl LeaderElector {
     // fn new() {}
 
@@ -44,7 +43,9 @@ impl LeaderElector {
         rx : & mut Receiver<Message>,
         tx : & mut HashMap<u64, Sender<Message>>,
         zab_epoch : u64,
-        last_zxid : u64)
+        last_zxid : u64,
+        quorum_size : u64
+    ) -> Option<u64>
     {
         let mut my_vote : Vote = Vote::new(self.id,
                                             last_zxid,
@@ -76,7 +77,7 @@ impl LeaderElector {
                     // our election is outdated, start again
                     if vote.election_epoch > self.election_epoch {
                         self.election_epoch = vote.election_epoch;
-                        return;
+                        return None;
                     }
                     
                     if vote.election_epoch == self.election_epoch
@@ -111,11 +112,12 @@ impl LeaderElector {
                             }
 
                             // quorum check
-                            let num_nodes = 4;
-                            if highest_votes >= num_nodes / 2 {
+                            if highest_votes >= quorum_size / 2 {
                                 // new leader is elected
+                                self.election_epoch += 1;
+                                return Some(new_leader);
                             }
-                            }
+                        }
                     } else {continue;}
 
                 }
@@ -124,11 +126,7 @@ impl LeaderElector {
                 }
             }
 
-            recv_set.insert(msg.sender_id as u64, vote);
-
-            // leader is successfully elected
-            self.election_epoch += 1;
-            return;
+            return None;
 
         }
     }
