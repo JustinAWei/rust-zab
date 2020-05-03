@@ -55,6 +55,13 @@ impl LeaderElector {
                                             NodeState::Looking);
         let mut recv_set        : HashMap<u64, Vote> = HashMap::new();
 
+        // broadcast self vote
+        let vote_msg = Message {
+            sender_id: self.id,
+            msg_type: MessageType::Vote(my_vote),
+        };
+        self.broadcast(tx, vote_msg);
+
         loop {
             // TODO : maybe change to recv_timeout
             let msg_result = rx.recv();
