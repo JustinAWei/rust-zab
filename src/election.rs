@@ -46,7 +46,6 @@ impl LeaderElector {
         zab_epoch : u64,
         last_zxid : u64)
     {
-        self.election_epoch += 1;
         let mut my_vote : Vote = Vote::new(self.id,
                                             last_zxid,
                                             self.election_epoch,
@@ -73,42 +72,21 @@ impl LeaderElector {
 
             match vote.sender_state {
                 NodeState::Looking => {
-                    if vote.election_epoch < self.election_epoch {
-                        // don't change my vote to vote for this node, since 
-                        //  they are in an out of date election
-                        continue
-                    } else if vote.election_epoch == self.election_epoch &&
-                                ! is_candidate_better(&my_vote, &vote)
-                    {
-                        // don't change my vote to vote for this node. They are
-                        //  in the same election round as me, but they are not as
-                        //  'best suited' for leader as I am
-                        continue
-                    }
-
-                    // update latest seen, set sender to proposed leader, and notify all nodes
+                    // our election is outdated, start again
                     if vote.election_epoch > self.election_epoch {
-                        // if I am in an outdated election round, discard all state and set election round
                         self.election_epoch = vote.election_epoch;
-                        recv_set.clear();
-                        if is_candidate_better(&my_vote, &vote) {
-                            my_vote = vote.clone();
-                            my_vote.sender_id = self.id;
-                        } else {
-                            // reset my vote to initial state
-                            my_vote = Vote::new(self.id,
-                                last_zxid,
-                                self.election_epoch,
-                                zab_epoch,
-                                self.id,
-                                NodeState::Looking);
-                        }
-                    } else if is_candidate_better(&my_vote, &vote) {
-                        my_vote = vote.clone();
-                        my_vote.sender_id = self.id;
+                        return;
                     }
-                    // TODO: send my_vote to all peers
-                    // TODO: evaluate if there is yet a quorum voting for the same leader
+                    
+                    if vote.election_epoch == self.election_epoch && is_candidate_better(&my_vote, &vote)
+                    {
+                        // TODO: send my_vote to all peers
+                        let vote_msg = Message {
+                            sender_id: self.id,
+                            msg_type: Vote(my_vote),
+                        };
+                        // TODO: evaluate if there is yet a quorum voting for the same leader
+                    } else {continue;}
 
                 }
                 _ => {
@@ -118,8 +96,19 @@ impl LeaderElector {
 
             recv_set.insert(msg.sender_id as u64, vote);
 
+            // leader is successfully elected
+            self.election_epoch += 1;
+            return;
+
         }
     }
+
+    fn broadcast(tx : & mut HashMap<usize, Sender<Message>>, msg : Message) {
+        for (_, s) in tx {
+            s.send(msg);
+        }
+    }
+    
     fn broadcast_new_state(
     )// follower or leader now)
     {

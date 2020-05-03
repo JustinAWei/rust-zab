@@ -5,7 +5,7 @@ use std::collections::{HashSet, HashMap};
 extern crate serde_json;
 use std::fs::File;
 use std::io::prelude::*;
-
+pub mod election;
 mod message;
 
 use message::{MessageType, Message, NodeState};
@@ -296,8 +296,6 @@ impl Node {
             let msg = self.receive();
             self.process(msg);
         }
-        /*
-        */
     }
 
     fn spawn_timeout(&self, zxid: i64) -> timer::Guard {
