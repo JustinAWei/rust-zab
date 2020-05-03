@@ -58,7 +58,7 @@ impl LeaderElector {
         // broadcast self vote
         let vote_msg = Message {
             sender_id: self.id,
-            msg_type: MessageType::Vote(my_vote),
+            msg_type: MessageType::Vote(my_vote.clone()),
         };
         self.broadcast(tx, vote_msg);
 
