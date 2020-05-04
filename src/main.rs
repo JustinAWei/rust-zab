@@ -239,6 +239,10 @@ impl Node {
                     }
                 }
             },
+            MessageType::Vote(vote) => {
+                // self.elector.invite_straggler(self.zxid, self.zab_epoch, self.state, tx[vote.sender_id]);
+            },
+
             _ => {
                 println!("Unsupported msg type for leader");
             }
@@ -285,6 +289,10 @@ impl Node {
                     None => {}
                 }
             },
+            MessageType::Vote(vote) => {
+                // self.elector.invite_straggler(self.zxid, self.zab_epoch, self.state, tx[vote.sender_id]);
+            },
+
             _ => {
                 println!("Unsupported msg type for follower");
             }

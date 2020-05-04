@@ -159,7 +159,7 @@ impl LeaderElector {
 
     fn invite_straggler(self, last_zxid: u64, zab_epoch: u64, state: NodeState, s: Sender<Message>) {
         // send my_vote to all peers
-        let mut my_vote : Vote = Vote::new(self.id,
+        let my_vote : Vote = Vote::new(self.id,
             last_zxid,
             self.election_epoch,
             zab_epoch,
