@@ -2,7 +2,7 @@ use crate::message::{MessageType, Message, NodeState, Vote};
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 
-struct LeaderElector {
+pub struct LeaderElector {
     // used for tie breaking and identifying leader node3
     //  should be same as zab node id
     id : u64,
@@ -35,20 +35,33 @@ fn is_candidate_better(my_vote : &Vote, new_vote : &Vote,) -> bool {
     }
     return false
 }
+/*
+    id : u64,
+    // which round of elections we are in, might be multiple retries for a single zab epoch
+    election_epoch : u64,
+    quorum_size : u64,
+    */
 
 impl LeaderElector {
-    // fn new() {}
+    pub fn new(id: u64, election_epoch: u64, quorum_size: u64) -> LeaderElector {
+        LeaderElector{
+            id: id,
+            election_epoch: election_epoch,
+            quorum_size: quorum_size,
+        }
+    }
 
     // caller should wait for this to return
     pub fn look_for_leader(
         & mut self,
         rx : & mut Receiver<Message>,
         tx : & mut HashMap<u64, Sender<Message>>,
-        zab_epoch : u64,
+        init_zab_epoch : u64,
         last_zxid : u64,
         quorum_size : u64
-    ) -> Option<u64>
+    ) -> Option<(u64, u64)>
     {
+        let mut zab_epoch = init_zab_epoch;
         let mut my_vote : Vote = Vote::new(self.id,
                                             last_zxid,
                                             self.election_epoch,
@@ -61,6 +74,7 @@ impl LeaderElector {
         // broadcast self vote
         let vote_msg = Message {
             sender_id: self.id,
+            epoch: zab_epoch,
             msg_type: MessageType::Vote(my_vote.clone()),
         };
         self.broadcast(tx, vote_msg);
@@ -94,12 +108,14 @@ impl LeaderElector {
                         recv_set.insert(vote.sender_id, vote.clone());
 
                         if is_candidate_better(&my_vote, &vote) {
+                            zab_epoch = vote.zab_epoch;
                             my_vote = vote.clone();
                             my_vote.sender_id = self.id;
 
                             // send my_vote to all peers
                             let vote_msg = Message {
                                 sender_id: self.id,
+                                epoch: zab_epoch,
                                 msg_type: MessageType::Vote(my_vote),
                             };
                             self.broadcast(tx, vote_msg);
@@ -108,7 +124,7 @@ impl LeaderElector {
                             match self.check_quorum(&recv_set) {
                                 Some(x) => {
                                     self.election_epoch += 1;
-                                    return Some(x);
+                                    return Some((zab_epoch, x));
                                 }
                                 None => {}
                             };
@@ -157,7 +173,7 @@ impl LeaderElector {
         }
     }
 
-    fn invite_straggler(self, last_zxid: u64, zab_epoch: u64, state: NodeState, s: Sender<Message>) {
+    pub fn invite_straggler(&self, last_zxid: u64, zab_epoch: u64, state: NodeState, s: &Sender<Message>) {
         // send my_vote to all peers
         let my_vote : Vote = Vote::new(self.id,
             last_zxid,
@@ -168,6 +184,7 @@ impl LeaderElector {
 
         let vote_msg = Message {
             sender_id: self.id,
+            epoch: zab_epoch,
             msg_type: MessageType::Vote(my_vote),
         };
         s.send(vote_msg);

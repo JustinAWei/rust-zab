@@ -1,6 +1,6 @@
 use std::cmp::PartialEq;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NodeState {
     Looking,
     Following,
@@ -45,19 +45,20 @@ pub enum MessageType {
     NewLeader(i64), // new epoch number, not diff leader
     UpToDate,
     */
-    Proposal(i64, String),
-    Ack(i64),
-    Commit(i64),
+    Proposal(u64, String),
+    Ack(u64),
+    Commit(u64),
     // Inform(i64),
     //
     // Our message types
     Vote(Vote),
     ClientProposal(String),
-    InternalTimeout(i64) // zxid of timed out transaction
+    InternalTimeout(u64) // zxid of timed out transaction
 }
 
 #[derive(Clone, Debug)]
 pub struct Message {
     pub sender_id: u64,
+    pub epoch: u64,
     pub msg_type: MessageType,
 }

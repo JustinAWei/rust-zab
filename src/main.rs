@@ -6,6 +6,7 @@ extern crate serde_json;
 use std::fs::File;
 use std::io::prelude::*;
 pub mod election;
+use election::LeaderElector;
 mod message;
 
 use message::{MessageType, Message, NodeState};
@@ -49,6 +50,7 @@ fn main() {
 
     let proposal = Message {
         sender_id: 0,
+        epoch: 0,
         msg_type: MessageType::ClientProposal(String::from("suhh")),
     };
     for _ in 0..5 {
@@ -70,8 +72,8 @@ struct InflightTxn {
 }
 
 struct ZabLog {
-    commit_log: Vec<(i64, String)>, // TODO: timestamp?
-    proposal_log: Vec<(i64, String)>, // TODO: timestamp?
+    commit_log: Vec<(u64, String)>, // TODO: timestamp?
+    proposal_log: Vec<(u64, String)>, // TODO: timestamp?
     lf: File,
 }
 
@@ -85,7 +87,7 @@ impl ZabLog {
         }
     }
 
-    fn record_proposal(&mut self, zxid: i64, data: String) {
+    fn record_proposal(&mut self, zxid: u64, data: String) {
         self.proposal_log.push((zxid, data.clone()));
 
         let entry = ("p", zxid, data);
@@ -96,7 +98,7 @@ impl ZabLog {
 
     }
 
-    fn record_commit(&mut self, zxid: i64, data: String) {
+    fn record_commit(&mut self, zxid: u64, data: String) {
         self.commit_log.push((zxid, data.clone()));
         let entry = ("c", zxid, data);
 
@@ -116,26 +118,31 @@ struct Node {
     quorum_size: u64,
     state: NodeState,
     leader: bool,
-    committed_zxid: i64,
-    next_zxid: i64,
+    epoch: u64,
+    // TODO why dis i
+    committed_zxid: u64,
+    next_zxid: u64,
     tx: HashMap<u64, Sender<Message>>,
     sx: Sender<Message>,
     rx: Receiver<Message>,
     zab_log: ZabLog,
-    inflight_txns: HashMap<i64, InflightTxn>,
+    inflight_txns: HashMap<u64, InflightTxn>,
     msg_thread: timer::MessageTimer<Message>,
+    leader_elector: LeaderElector,
 }
 
 impl Node {
-    fn new(i: u64, cluster_size: u64, is_leader: bool) -> Node {
+    pub fn new(i: u64, cluster_size: u64, is_leader: bool) -> Node {
         assert!(cluster_size % 2 == 1);
         let (s, r) = channel();
+        let quorum_size = (cluster_size + 1) / 2;
         Node {
             id: i,
             cluster_size: cluster_size,
-            quorum_size: (cluster_size + 1) / 2,
+            quorum_size: quorum_size,
             state: NodeState::Looking,
             leader: is_leader,
+            epoch: 0,
             committed_zxid: 0,
             next_zxid: 1,
             tx: HashMap::new(),
@@ -143,7 +150,8 @@ impl Node {
             rx: r,
             inflight_txns: HashMap::new(),
             msg_thread: timer::MessageTimer::new(s),
-            zab_log: ZabLog::new(i as i64)
+            zab_log: ZabLog::new(i as i64),
+            leader_elector: LeaderElector::new(i, 0, quorum_size.clone()),
         }
     }
 
@@ -177,6 +185,9 @@ impl Node {
     }
 
     fn process_leader(&mut self, msg: Message) {
+        if msg.epoch != self.epoch {
+            println!("~~~bad things have happened, ooh spooky~~~");
+        };
         match msg.msg_type {
             MessageType::ClientProposal(data) => {
                 let zxid = self.next_zxid;
@@ -193,6 +204,7 @@ impl Node {
                 self.inflight_txns.insert(zxid, txn);
                 let send_msg = Message {
                     sender_id: self.id,
+                    epoch: self.epoch,
                     msg_type: MessageType::Proposal(zxid, data),
                 };
                 for id in 0..self.cluster_size {
@@ -224,6 +236,7 @@ impl Node {
                             // we can first send to followers before writing in our own logs
                             let send_msg = Message {
                                 sender_id: self.id,
+                                epoch: self.epoch,
                                 msg_type: MessageType::Commit(zxid),
                             };
                             for id in 0..self.cluster_size {
@@ -240,7 +253,7 @@ impl Node {
                 }
             },
             MessageType::Vote(vote) => {
-                // self.elector.invite_straggler(self.zxid, self.zab_epoch, self.state, tx[vote.sender_id]);
+                self.leader_elector.invite_straggler(self.committed_zxid, self.epoch, self.state, &self.tx[&msg.sender_id]);
             },
 
             _ => {
@@ -269,6 +282,7 @@ impl Node {
                 // send ACK(zxid) to the great leader.
                 let ack = Message {
                     sender_id: self.id,
+                    epoch: self.epoch,
                     msg_type: MessageType::Ack(zxid)
                 };
                 self.send(leader_id, ack);
@@ -306,11 +320,12 @@ impl Node {
         }
     }
 
-    fn spawn_timeout(&self, zxid: i64) -> timer::Guard {
+    fn spawn_timeout(&self, zxid: u64) -> timer::Guard {
         self.msg_thread.schedule_with_delay(
             chrono::Duration::milliseconds(TXN_TIMEOUT_MS),
             Message {
                 sender_id: self.id,
+                epoch: self.epoch,
                 // TODO handle this message
                 msg_type: MessageType::InternalTimeout(
                     zxid
