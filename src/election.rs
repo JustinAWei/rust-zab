@@ -82,8 +82,7 @@ impl LeaderElector {
             }
 
             match vote.sender_state {
-                NodeState::Looking => {
-                    
+                NodeState::Looking => {                    
                     // our election is outdated, start again
                     if vote.election_epoch > self.election_epoch {
                         self.election_epoch = vote.election_epoch;
@@ -158,8 +157,20 @@ impl LeaderElector {
         }
     }
 
-    fn invite_straggler(self) {
+    fn invite_straggler(self, last_zxid: u64, zab_epoch: u64, state: NodeState, s: Sender<Message>) {
+        // send my_vote to all peers
+        let mut my_vote : Vote = Vote::new(self.id,
+            last_zxid,
+            self.election_epoch,
+            zab_epoch,
+            self.id,
+            state);
 
+        let vote_msg = Message {
+            sender_id: self.id,
+            msg_type: MessageType::Vote(my_vote),
+        };
+        s.send(vote_msg);
     }
 
     fn broadcast(&self, tx : & mut HashMap<u64, Sender<Message>>, msg : Message) {
