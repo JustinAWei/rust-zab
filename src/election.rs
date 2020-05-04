@@ -3,11 +3,12 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 
 struct LeaderElector {
-    // used for tie breaking and identifying leader node
+    // used for tie breaking and identifying leader node3
     //  should be same as zab node id
     id : u64,
     // which round of elections we are in, might be multiple retries for a single zab epoch
     election_epoch : u64,
+    quorum_size : u64,
 }
 
 fn is_vote_msg(msg : & Message) -> (bool, Vote) {
@@ -34,6 +35,7 @@ fn is_candidate_better(my_vote : &Vote, new_vote : &Vote,) -> bool {
     }
     return false
 }
+
 impl LeaderElector {
     // fn new() {}
 
@@ -55,6 +57,7 @@ impl LeaderElector {
                                             NodeState::Looking);
         let mut recv_set        : HashMap<u64, Vote> = HashMap::new();
 
+        self.quorum_size = quorum_size;
         // broadcast self vote
         let vote_msg = Message {
             sender_id: self.id,
@@ -103,39 +106,60 @@ impl LeaderElector {
                             self.broadcast(tx, vote_msg);
 
                             // TODO: evaluate if there is yet a quorum voting for the same leader
-                            let mut counts : HashMap<u64, u64> = HashMap::new();
-
-                            for (_, v) in &recv_set {
-                                let candidate_id = v.leader;
-                                *counts.entry(candidate_id).or_insert(0) += 1;
-                            }
-
-                            let mut new_leader = 0;
-                            let highest_votes = 0;
-                            for (candidate, count) in counts {
-                                if highest_votes < count {
-                                    new_leader = candidate;
+                            match self.check_quorum(&recv_set) {
+                                Some(x) => {
+                                    self.election_epoch += 1;
+                                    return Some(x);
                                 }
-                            }
+                                None => {}
+                            };
 
-                            // quorum check
-                            if highest_votes >= quorum_size / 2 {
-                                // new leader is elected
-                                self.election_epoch += 1;
-                                return Some(new_leader);
-                            }
                         }
                     } else {continue;}
 
                 }
-                _ => {
-                    // TODO: check if we should follow sender's leader
+                NodeState::Following | NodeState::Leading => {
+                    // check if we should follow sender's leader
+                    self.check_quorum(&recv_set);
+                    recv_set.insert(vote.sender_id, vote.clone());
+
                 }
             }
 
             return None;
 
         }
+    }
+
+    fn check_quorum(&self, recv_set : &HashMap<u64, Vote>) -> Option<u64> {
+        // zab epoch, node id
+        let mut counts : HashMap<(u64,u64), u64> = HashMap::new();
+
+        for (_, v) in recv_set {
+            let candidate_id = (v.zab_epoch, v.leader);
+            *counts.entry(candidate_id).or_insert(0) += 1;
+        }
+
+        let mut new_leader = 0;
+        let highest_votes = 0;
+        for ((_, candidate), count) in counts {
+            if highest_votes < count {
+                new_leader = candidate;
+            }
+        }
+
+        // quorum check
+        if highest_votes >= self.quorum_size / 2 {
+            // new leader is elected
+            Some(new_leader)
+        }
+        else {
+            None
+        }
+    }
+
+    fn invite_straggler(self) {
+
     }
 
     fn broadcast(&self, tx : & mut HashMap<u64, Sender<Message>>, msg : Message) {
