@@ -335,7 +335,7 @@ impl Node {
     }
 
     // TODO: timing on messages
-    fn leader_p1 (mut self, le_epoch: u64) -> bool {
+    fn leader_p1 (&mut self, le_epoch: u64) -> bool {
         // wait for quorum FOLLOWERINFO
         let mut m : HashMap<u64, bool> = HashMap::new();
         loop {
@@ -389,7 +389,7 @@ impl Node {
 
     }
 
-    fn follower_p1(mut self, leader_id: u64) {
+    fn follower_p1(&mut self, leader_id: u64) {
         // f Followers connect the the leader and send FOLLOWERINFO.
         let msg = Message {
             msg_type: MessageType::FollowerInfo(self.epoch, "".to_string()),
