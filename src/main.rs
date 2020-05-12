@@ -176,7 +176,7 @@ impl Node {
         m
     }
 
-    fn process(&mut self, msg:Message) {
+    fn process(&mut self, msg: Message) {
         if self.leader {
             self.process_leader(msg);
         } else {
@@ -335,7 +335,7 @@ impl Node {
     }
 
     // TODO: timing on messages
-    fn leader_p1 (&mut self, le_epoch: u64) -> bool {
+    fn leader_p1(&mut self, le_epoch: u64) -> bool {
         // wait for quorum FOLLOWERINFO
         let mut m : HashMap<u64, bool> = HashMap::new();
         loop {
