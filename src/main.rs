@@ -304,7 +304,7 @@ impl Node {
                 }
             },
             MessageType::Vote(vote) => {
-                // self.elector.invite_straggler(self.zxid, self.zab_epoch, self.state, tx[vote.sender_id]);
+                self.leader_elector.invite_straggler(self.committed_zxid, self.epoch, self.state, &self.tx[&msg.sender_id]);
             },
 
             _ => {
