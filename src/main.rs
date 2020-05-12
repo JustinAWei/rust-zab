@@ -189,6 +189,7 @@ impl Node {
             println!("~~~bad things have happened, ooh spooky~~~");
         };
         match msg.msg_type {
+            // TODO handle p1, p2 msgs
             MessageType::ClientProposal(data) => {
                 let zxid = self.next_zxid;
                 self.next_zxid += 1;
@@ -265,6 +266,7 @@ impl Node {
     fn process_follower(&mut self, msg: Message) {
         let leader_id = msg.sender_id;
         match msg.msg_type {
+            // TODO handle p1, p2 msgs
             MessageType::Proposal(zxid, data) => {
                 if zxid != self.next_zxid {
                     println!("follower missed a zxid");
@@ -430,6 +432,88 @@ impl Node {
 
         }
     }
+
+    // TODO: timeout in phase 2 (feifei can deal with it)
+    fn leader_p2(&mut self, connected_followers: HashMap<u64, u64>, proposed_epoch: u64) {
+        // Sync follower logs with leader logs
+        for (f_id, f_zxid) in connected_followers {
+            self.sync_with_follower(f_id, f_zxid, proposed_epoch);
+        }
+
+        // Wait until quorum has acked the sync operation
+        let mut acks: HashSet<u64> = HashSet::new();
+        loop {
+            let msg = self.receive();
+            match msg.msg_type {
+                MessageType::Ack(zxid) => {
+                    assert!(zxid == (proposed_epoch) << 32);
+                    acks.insert(msg.sender_id);
+                    if acks.len() >= self.quorum_size as usize {
+                        break;
+                    }
+                },
+                _ => {},
+            };
+        }
+        self.epoch = proposed_epoch;
+        self.next_zxid = (self.epoch << 32) + 1;
+        self.state = NodeState::Leading;
+
+        // Send up to date to all acked followers
+        for f_id in acks {
+            let msg = Message {
+                msg_type: MessageType::UpToDate,
+                sender_id: self.id,
+                epoch: self.epoch,
+            };
+            self.send(f_id, msg);
+        }
+    }
+
+    fn follower_p2(&mut self) {
+        // Waits for synchronization message
+        loop {
+            let msg = self.receive();
+            match msg.msg_type {
+                MessageType::Snap(commit_log) => {
+                    self.zab_log.commit_log = commit_log;
+                    self.epoch = msg.epoch;
+                    self.next_zxid = (self.epoch << 32) + 1;
+                    let ack_msg = Message {
+                        msg_type: MessageType::Ack(self.epoch << 32),
+                        sender_id: self.id,
+                        epoch: self.epoch,
+                    };
+                    self.send(msg.sender_id, ack_msg);
+                    break;
+                },
+                _ => {},
+            };
+        }
+
+        // Waits for UpToDate before accepting connections for new epoch
+        loop {
+            let msg = self.receive();
+            match msg.msg_type {
+                MessageType::UpToDate => {
+                    break;
+                },
+                _ => {},
+            };
+        }
+        self.state = NodeState::Following;
+    }
+
+    fn sync_with_follower(&mut self, follower_id: u64, follower_zxid: u64, proposed_epoch: u64) {
+        // TODO: always SNAP for now
+        let msg = Message {
+            msg_type: MessageType::Snap(self.zab_log.commit_log.clone()),
+            sender_id: self.id,
+            epoch: proposed_epoch,
+        };
+        self.send(follower_id, msg);
+    }
+
     fn broadcast(&mut self, msg : Message) {
         for i in 0..self.cluster_size {
             if i != self.id {

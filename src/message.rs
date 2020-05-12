@@ -37,13 +37,13 @@ pub enum MessageType {
     FollowerInfo(u64, String),
     LeaderInfo(u64),
     AckEpoch(u64, u64),
+    Snap(Vec<(u64, String)>),
+    UpToDate,
     /*
     Diff(u64),
     Trunc(u64),
-    Snap(u64),
     ObserverInfo(u64),
     NewLeader(u64), // new epoch number, not diff leader
-    UpToDate,
     */
     Proposal(u64, String),
     Ack(u64),
