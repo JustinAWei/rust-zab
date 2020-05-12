@@ -33,22 +33,22 @@ impl Vote {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MessageType {
-    // Zab message types
+    // Zab message typess
+    FollowerInfo(u64, String),
+    LeaderInfo(u64),
+    AckEpoch(u64),
     /*
-    FollowerInfo(i64, String),
-    Diff(i64),
-    Trunc(i64),
-    Snap(i64),
-    ObserverInfo(i64),
-    LeaderInfo(i64),
-    AckEpoch(i64),
-    NewLeader(i64), // new epoch number, not diff leader
+    Diff(u64),
+    Trunc(u64),
+    Snap(u64),
+    ObserverInfo(u64),
+    NewLeader(u64), // new epoch number, not diff leader
     UpToDate,
     */
     Proposal(u64, String),
     Ack(u64),
     Commit(u64),
-    // Inform(i64),
+    // Inform(u64),
     //
     // Our message types
     Vote(Vote),

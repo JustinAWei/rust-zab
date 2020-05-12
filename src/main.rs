@@ -78,7 +78,7 @@ struct ZabLog {
 }
 
 impl ZabLog {
-    fn new(i: i64) -> ZabLog {
+    fn new(i: u64) -> ZabLog {
         let fpath = "./log".to_string() + &i.to_string();
         ZabLog {
             commit_log: Vec::new(),
@@ -150,7 +150,7 @@ impl Node {
             rx: r,
             inflight_txns: HashMap::new(),
             msg_thread: timer::MessageTimer::new(s),
-            zab_log: ZabLog::new(i as i64),
+            zab_log: ZabLog::new(i as u64),
             leader_elector: LeaderElector::new(i, 0, quorum_size.clone()),
         }
     }
@@ -333,5 +333,84 @@ impl Node {
             }
         )
     }
-    
+   
+    // TODO: timing on messages
+    fn leader_p1 (self) {
+        // wait for quorum FOLLOWERINFO
+        let mut m : HashMap<u64, bool> = HashMap::new();
+        loop {
+            let msg = self.receive();
+            match msg.msg_type {
+                // TODO: vote handling
+                MessageType::FollowerInfo(e, _) => {
+                    m.insert(msg.sender_id, true);
+                    if m.len() >= self.quorum_size as usize {
+                        break;
+                    }
+                },
+                _ => {}
+            };
+        }
+
+        // stops accepting connections
+        // sends LEADERINFO(e) to all followers, where e is greater than all f.acceptedEpoch in the quorum
+        
+
+        // The leader waits for a quorum of followers to send ACKEPOCH.
+
+        // verify
+        // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
+        // f.currentEpoch <= l.currentEpoch
+        // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
+    }
+
+    fn follower_p1(mut self, leader_id: u64) {
+        // f Followers connect the the leader and send FOLLOWERINFO.
+        let msg = Message {
+            msg_type: MessageType::FollowerInfo(self.epoch, "".to_string()),
+            sender_id: self.id,
+            epoch: 0,
+        };
+        self.send(leader_id, msg);
+        
+        // TODO: timing on messages
+        loop {
+            // When the follower receives LEADERINFO(e) it will do one of the following:
+            let leaderinfo = self.receive();
+
+            match leaderinfo.msg_type {
+                // TODO: handle phase 0 messages
+                
+                MessageType::LeaderInfo(e) => {
+                    // if e > f.acceptedEpoch, the follower sets f.acceptedEpoch = e and sends ACKEPOCH(e);
+                    if e > self.epoch {
+                        self.epoch = e;
+                        let msg = Message {
+                            msg_type: MessageType::AckEpoch(self.epoch),
+                            sender_id: self.id,
+                            epoch: 0,
+                        };
+                        self.send(leader_id, msg);
+                    } else if e == self.epoch {
+                        // if e == f.acceptedEpoch, the follower does not send ACKEPOCH, but continues to next step;
+                    } else if e < self.epoch {
+                        // if e < f.acceptedEpoch,
+                        // TODO: the follower closes the connection to the leader and goes back to leader election;
+                    }
+                    break;
+
+                },
+                _ => {}
+            };
+
+        }
+    }
+    fn broadcast(&mut self, msg : Message) {
+        for i in 0..self.cluster_size {
+            if i != self.id {
+                self.tx[&i].send(msg.clone());
+            }
+        }
+    }
+
 }
