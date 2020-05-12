@@ -335,7 +335,7 @@ impl Node {
     }
    
     // TODO: timing on messages
-    fn leader_p1 (self) {
+    fn leader_p1 (mut self, le_epoch: u64) -> bool {
         // wait for quorum FOLLOWERINFO
         let mut m : HashMap<u64, bool> = HashMap::new();
         loop {
@@ -354,14 +354,39 @@ impl Node {
 
         // stops accepting connections
         // sends LEADERINFO(e) to all followers, where e is greater than all f.acceptedEpoch in the quorum
-        
+        let msg = Message {
+            msg_type: MessageType::LeaderInfo(le_epoch),
+            sender_id: self.id,
+            epoch: 0,
+        };
+        self.broadcast(msg);
 
+        // TODO: Timing
         // The leader waits for a quorum of followers to send ACKEPOCH.
+        let mut m : HashMap<u64, bool> = HashMap::new();
+        loop {
+            let msg = self.receive();
+            match msg.msg_type {
+                // TODO: vote handling
+                MessageType::AckEpoch(follower_z, follower_epoch) => {
+                    // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
+                    // f.currentEpoch <= l.currentEpoch
+                    if !(follower_epoch <= self.epoch) {
+                        return false;
+                    }
+                    // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
+                    if follower_epoch == self.epoch && !(follower_z <= self.committed_zxid) {
+                        return false;
+                    }
+                    m.insert(msg.sender_id, true);
+                    if m.len() >= self.quorum_size as usize {
+                        return true;
+                    }
+                },
+                _ => {}
+            };
+        }
 
-        // verify
-        // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
-        // f.currentEpoch <= l.currentEpoch
-        // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
     }
 
     fn follower_p1(mut self, leader_id: u64) {
@@ -386,7 +411,7 @@ impl Node {
                     if e > self.epoch {
                         self.epoch = e;
                         let msg = Message {
-                            msg_type: MessageType::AckEpoch(self.epoch),
+                            msg_type: MessageType::AckEpoch(self.committed_zxid, self.epoch),
                             sender_id: self.id,
                             epoch: 0,
                         };

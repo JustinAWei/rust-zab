@@ -36,7 +36,7 @@ pub enum MessageType {
     // Zab message typess
     FollowerInfo(u64, String),
     LeaderInfo(u64),
-    AckEpoch(u64),
+    AckEpoch(u64, u64),
     /*
     Diff(u64),
     Trunc(u64),
