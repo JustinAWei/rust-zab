@@ -96,13 +96,13 @@ impl LeaderElector {
             }
 
             match vote.sender_state {
-                NodeState::Looking => {                    
+                NodeState::Looking => {
                     // our election is outdated, start again
                     if vote.election_epoch > self.election_epoch {
                         self.election_epoch = vote.election_epoch;
                         return None;
                     }
-                    
+
                     if vote.election_epoch == self.election_epoch
                     {
                         recv_set.insert(vote.sender_id, vote.clone());
@@ -195,7 +195,7 @@ impl LeaderElector {
             s.send(msg.clone());
         }
     }
-    
+
     fn broadcast_new_state(
     )// follower or leader now)
     {

@@ -24,7 +24,7 @@ impl Vote {
             leader : leader,
             zxid   : zxid,
             election_epoch : election_epoch,
-            zab_epoch : zab_epoch, 
+            zab_epoch : zab_epoch,
             sender_id : sender_id,
             sender_state : sender_state
         }

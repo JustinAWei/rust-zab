@@ -333,7 +333,7 @@ impl Node {
             }
         )
     }
-   
+
     // TODO: timing on messages
     fn leader_p1 (mut self, le_epoch: u64) -> bool {
         // wait for quorum FOLLOWERINFO
@@ -397,7 +397,7 @@ impl Node {
             epoch: 0,
         };
         self.send(leader_id, msg);
-        
+
         // TODO: timing on messages
         loop {
             // When the follower receives LEADERINFO(e) it will do one of the following:
@@ -405,7 +405,7 @@ impl Node {
 
             match leaderinfo.msg_type {
                 // TODO: handle phase 0 messages
-                
+
                 MessageType::LeaderInfo(e) => {
                     // if e > f.acceptedEpoch, the follower sets f.acceptedEpoch = e and sends ACKEPOCH(e);
                     if e > self.epoch {
