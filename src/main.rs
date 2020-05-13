@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Sender, Receiver, channel};
+use std::sync::mpsc::{Sender, Receiver, channel, RecvTimeoutError};
 use std::thread;
 use std::collections::{HashSet, HashMap};
 // extern crate serde;
@@ -8,11 +8,14 @@ use std::io::prelude::*;
 pub mod election;
 use election::LeaderElector;
 mod message;
+use std::time::{Duration, Instant};
 
 use message::{MessageType, Message, NodeState};
 extern crate timer;
 extern crate chrono;
 const TXN_TIMEOUT_MS : i64 = 400;
+const PH1_TIMEOUT_MS : u64 = 1600;
+const PH2_TIMEOUT_MS : u64 = 1600;
 
 fn main() {
     // create the node objects
@@ -169,11 +172,33 @@ impl Node {
         self.tx[&id].send(msg).unwrap();
         //println!("send successful");
     }
+
     fn receive(&self) -> Message {
         //println!("node {} receiving...", self.id);
         let m = self.rx.recv().unwrap();
         println!("node {} received {:?}", self.id, m);
         m
+    }
+    
+    fn receive_timeout(&self, t: Duration) -> Option<Message> {
+        //println!("node {} receiving...", self.id);
+        match self.rx.recv_timeout(t) {
+            Ok(m) => {
+                println!("node {} received {:?}", self.id, m);
+                return Some(m);
+            },
+            Err(err) => {
+                match err {
+                    RecvTimeoutError::Timeout => {
+                        return None;
+                    },
+                    RecvTimeoutError::Disconnected => {
+                        // TODO: maybe panic instead
+                        return None;
+                    },
+                }
+            },
+        }
     }
 
     fn process(&mut self, msg: Message) {
@@ -328,7 +353,6 @@ impl Node {
             Message {
                 sender_id: self.id,
                 epoch: self.epoch,
-                // TODO handle this message
                 msg_type: MessageType::InternalTimeout(
                     zxid
                 )
@@ -336,22 +360,26 @@ impl Node {
         )
     }
 
-    // TODO: timing on messages
     fn leader_p1(&mut self, le_epoch: u64) -> bool {
         // wait for quorum FOLLOWERINFO
         let mut m : HashMap<u64, bool> = HashMap::new();
+        let mut last_recv = Instant::now();
         loop {
-            let msg = self.receive();
-            match msg.msg_type {
-                // TODO: vote handling
-                MessageType::FollowerInfo(e, _) => {
-                    m.insert(msg.sender_id, true);
+            let msg_option = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
+            if let Some(msg) = msg_option {
+                if let MessageType::FollowerInfo(e, txid) = msg.msg_type {
+                    if m.insert(msg.sender_id, true) == None {
+                        last_recv = Instant::now();
+                    }
                     if m.len() >= self.quorum_size as usize {
                         break;
                     }
-                },
-                _ => {}
-            };
+                }
+            }
+            if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
+                // timeout when waiting for a quorum of followers to ACK
+                return false;
+            }
         }
 
         // stops accepting connections
@@ -363,14 +391,13 @@ impl Node {
         };
         self.broadcast(msg);
 
-        // TODO: Timing
         // The leader waits for a quorum of followers to send ACKEPOCH.
         let mut m : HashMap<u64, bool> = HashMap::new();
+        last_recv = Instant::now();
         loop {
-            let msg = self.receive();
-            match msg.msg_type {
-                // TODO: vote handling
-                MessageType::AckEpoch(follower_z, follower_epoch) => {
+            let msg_timeout = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
+            if let Some(msg) = msg_timeout {
+                if let MessageType::AckEpoch(follower_z, follower_epoch) = msg.msg_type {
                     // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
                     // f.currentEpoch <= l.currentEpoch
                     if !(follower_epoch <= self.epoch) {
@@ -380,18 +407,23 @@ impl Node {
                     if follower_epoch == self.epoch && !(follower_z <= self.committed_zxid) {
                         return false;
                     }
-                    m.insert(msg.sender_id, true);
+                    if m.insert(msg.sender_id, true) == None {
+                        last_recv = Instant::now();
+                    }
                     if m.len() >= self.quorum_size as usize {
                         return true;
                     }
-                },
-                _ => {}
-            };
+                }
+            }
+            if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
+                // timeout when waiting for a quorum of followers to ACK
+                return false;
+            }
         }
 
     }
 
-    fn follower_p1(&mut self, leader_id: u64) {
+    fn follower_p1(&mut self, leader_id: u64) -> bool {
         // f Followers connect the the leader and send FOLLOWERINFO.
         let msg = Message {
             msg_type: MessageType::FollowerInfo(self.epoch, "".to_string()),
@@ -400,15 +432,13 @@ impl Node {
         };
         self.send(leader_id, msg);
 
-        // TODO: timing on messages
+        let last_recv = Instant::now();
         loop {
             // When the follower receives LEADERINFO(e) it will do one of the following:
-            let leaderinfo = self.receive();
+            let leaderinfo_option = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
 
-            match leaderinfo.msg_type {
-                // TODO: handle phase 0 messages
-
-                MessageType::LeaderInfo(e) => {
+            if let Some(leaderinfo) = leaderinfo_option  {
+                if let MessageType::LeaderInfo(e) = leaderinfo.msg_type {
                     // if e > f.acceptedEpoch, the follower sets f.acceptedEpoch = e and sends ACKEPOCH(e);
                     if e > self.epoch {
                         self.epoch = e;
@@ -422,19 +452,20 @@ impl Node {
                         // if e == f.acceptedEpoch, the follower does not send ACKEPOCH, but continues to next step;
                     } else if e < self.epoch {
                         // if e < f.acceptedEpoch,
-                        // TODO: the follower closes the connection to the leader and goes back to leader election;
+                        // follower closes the connection to the leader and goes back to leader election;
+                        return false;
                     }
-                    break;
-
-                },
-                _ => {}
-            };
-
+                    return true;
+                }
+            }
+            if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
+                // timeout when waiting for leader candidate response
+                return false;
+            }
         }
     }
 
-    // TODO: timeout in phase 2 (feifei can deal with it)
-    fn leader_p2(&mut self, connected_followers: HashMap<u64, u64>, proposed_epoch: u64) {
+    fn leader_p2(&mut self, connected_followers: HashMap<u64, u64>, proposed_epoch: u64) -> bool {
         // Sync follower logs with leader logs
         for (f_id, f_zxid) in connected_followers {
             self.sync_with_follower(f_id, f_zxid, proposed_epoch);
@@ -442,18 +473,24 @@ impl Node {
 
         // Wait until quorum has acked the sync operation
         let mut acks: HashSet<u64> = HashSet::new();
+        let mut last_recv = Instant::now();
         loop {
-            let msg = self.receive();
-            match msg.msg_type {
-                MessageType::Ack(zxid) => {
+            let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
+            if let Some(msg) = msg_option {
+                if let MessageType::Ack(zxid) = msg.msg_type {
                     assert!(zxid == (proposed_epoch) << 32);
-                    acks.insert(msg.sender_id);
+                    if acks.insert(msg.sender_id) {
+                        last_recv = Instant::now();
+                    }
                     if acks.len() >= self.quorum_size as usize {
                         break;
                     }
-                },
-                _ => {},
-            };
+                }
+            }
+            if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
+                // timeout when waiting for a quorum of followers to ACK
+                return false;
+            }
         }
         self.epoch = proposed_epoch;
         self.next_zxid = (self.epoch << 32) + 1;
@@ -468,14 +505,16 @@ impl Node {
             };
             self.send(f_id, msg);
         }
+        return true;
     }
 
-    fn follower_p2(&mut self) {
+    fn follower_p2(&mut self) -> bool {
         // Waits for synchronization message
+        let last_recv = Instant::now();
         loop {
-            let msg = self.receive();
-            match msg.msg_type {
-                MessageType::Snap(commit_log) => {
+            let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
+            if let Some(msg) = msg_option {
+                if let MessageType::Snap(commit_log) = msg.msg_type {
                     self.zab_log.commit_log = commit_log;
                     self.epoch = msg.epoch;
                     self.next_zxid = (self.epoch << 32) + 1;
@@ -486,22 +525,30 @@ impl Node {
                     };
                     self.send(msg.sender_id, ack_msg);
                     break;
-                },
-                _ => {},
+                }
             };
+            if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
+                // timeout when waiting for leader candidate response
+                return false;
+            }
         }
 
         // Waits for UpToDate before accepting connections for new epoch
+        let last_recv = Instant::now();
         loop {
-            let msg = self.receive();
-            match msg.msg_type {
-                MessageType::UpToDate => {
+            let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
+            if let Some(msg) = msg_option {
+                if msg.msg_type == MessageType::UpToDate {
                     break;
-                },
-                _ => {},
+                }
             };
+            if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
+                // timeout when waiting for leader candidate response
+                return false;
+            }
         }
         self.state = NodeState::Following;
+        return true;
     }
 
     fn sync_with_follower(&mut self, follower_id: u64, follower_zxid: u64, proposed_epoch: u64) {
