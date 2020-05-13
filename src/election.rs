@@ -56,16 +56,16 @@ impl LeaderElector {
         & mut self,
         rx : & mut Receiver<Message>,
         tx : & mut HashMap<u64, Sender<Message>>,
-        init_zab_epoch : u64,
+        init_proposed_zab_epoch : u64,
         last_zxid : u64,
         quorum_size : u64
     ) -> Option<(u64, u64)>
     {
-        let mut zab_epoch = init_zab_epoch;
+        let mut proposed_zab_epoch = init_proposed_zab_epoch;
         let mut my_vote : Vote = Vote::new(self.id,
                                             last_zxid,
                                             self.election_epoch,
-                                            zab_epoch,
+                                            proposed_zab_epoch,
                                             self.id,
                                             NodeState::Looking);
         let mut recv_set        : HashMap<u64, Vote> = HashMap::new();
@@ -74,7 +74,7 @@ impl LeaderElector {
         // broadcast self vote
         let vote_msg = Message {
             sender_id: self.id,
-            epoch: zab_epoch,
+            epoch: proposed_zab_epoch,
             msg_type: MessageType::Vote(my_vote.clone()),
         };
         self.broadcast(tx, vote_msg);
@@ -105,31 +105,33 @@ impl LeaderElector {
 
                     if vote.election_epoch == self.election_epoch
                     {
+                        println!("recieved our on the same epoch!");
                         recv_set.insert(vote.sender_id, vote.clone());
+                        // TODO: evaluate if there is yet a quorum voting for the same leader
+                        match self.check_quorum(&recv_set) {
+                            Some(x) => {
+                                self.election_epoch += 1;
+                                return Some((proposed_zab_epoch, x));
+                            }
+                            None => {}
+                        };
 
                         if is_candidate_better(&my_vote, &vote) {
-                            zab_epoch = vote.zab_epoch;
+                            println!("candidate better!");
+
+                            proposed_zab_epoch = vote.zab_epoch;
                             my_vote = vote.clone();
                             my_vote.sender_id = self.id;
 
                             // send my_vote to all peers
                             let vote_msg = Message {
                                 sender_id: self.id,
-                                epoch: zab_epoch,
+                                epoch: proposed_zab_epoch,
                                 msg_type: MessageType::Vote(my_vote),
                             };
                             self.broadcast(tx, vote_msg);
-
-                            // TODO: evaluate if there is yet a quorum voting for the same leader
-                            match self.check_quorum(&recv_set) {
-                                Some(x) => {
-                                    self.election_epoch += 1;
-                                    return Some((zab_epoch, x));
-                                }
-                                None => {}
-                            };
-
                         }
+                        
                     } else {continue;}
 
                 }
@@ -173,18 +175,18 @@ impl LeaderElector {
         }
     }
 
-    pub fn invite_straggler(&self, last_zxid: u64, zab_epoch: u64, state: NodeState, s: &Sender<Message>) {
+    pub fn invite_straggler(&self, last_zxid: u64, proposed_zab_epoch: u64, state: NodeState, s: &Sender<Message>) {
         // send my_vote to all peers
         let my_vote : Vote = Vote::new(self.id,
             last_zxid,
             self.election_epoch,
-            zab_epoch,
+            proposed_zab_epoch,
             self.id,
             state);
 
         let vote_msg = Message {
             sender_id: self.id,
-            epoch: zab_epoch,
+            epoch: proposed_zab_epoch,
             msg_type: MessageType::Vote(my_vote),
         };
         s.send(vote_msg);
