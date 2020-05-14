@@ -138,10 +138,25 @@ fn three_election_epoch_cmp_1() {
     n_election(vec![(0,1,0,0), (1,1,0,0), (2,1,0,0)], Some((0,2)));
 }
 
-// #[test]
-// fn three_election_epoch_cmp_2() {
-//     n_election(vec![(0,0,0,0), (1,0,0,0), (2,1,0,0)], Some((0,2)));
-// }
+#[test]
+fn three_election_epoch_cmp_2() {
+    n_election(vec![(0,0,0,0), (1,0,0,0), (2,1,0,0)], Some((0,2)));
+}
+
+#[test]
+fn three_election_epoch_cmp_3() {
+    n_election(vec![(0,0,0,0), (1,0,0,0), (2,2,0,0)], Some((0,2)));
+}
+
+#[test]
+fn three_election_epoch_cmp_4() {
+    n_election(vec![(0,0,0,0), (1,0,0,0), (2,20,0,0)], Some((0,2)));
+}
+
+#[test]
+fn three_election_epoch_cmp_5() {
+    n_election(vec![(0,0,0,0), (1,0,0,0), (2,100,0,0)], Some((0,2)));
+}
 
 #[test]
 fn fifty_one_election() {

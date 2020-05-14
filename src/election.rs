@@ -61,6 +61,7 @@ impl LeaderElector {
         quorum_size : u64
     ) -> Option<(u64, u64)>
     {
+        // println!("{} looking for leader\n", self.id);
         let mut proposed_zab_epoch = init_proposed_zab_epoch;
         let mut my_vote : Vote = Vote::new(self.id,
                                             last_zxid,
@@ -77,7 +78,7 @@ impl LeaderElector {
             epoch: proposed_zab_epoch,
             msg_type: MessageType::Vote(my_vote.clone()),
         };
-        self.broadcast(tx, vote_msg);
+        self.broadcast(tx, vote_msg.clone());
 
         loop {
             // TODO : maybe change to recv_timeout
@@ -97,16 +98,28 @@ impl LeaderElector {
 
             match vote.sender_state {
                 NodeState::Looking => {
+
                     // our election is outdated, start again
                     if vote.election_epoch > self.election_epoch {
+                        // println!("{} - old {}, new {}", self.id, self.election_epoch, vote.election_epoch);
                         self.election_epoch = vote.election_epoch;
                         return None;
                     }
 
                     if vote.election_epoch == self.election_epoch
                     {
+                        // respond to message
+                        if vote.sender_id != self.id {
+                            let vote_msg = Message {
+                                sender_id: self.id,
+                                epoch: proposed_zab_epoch,
+                                msg_type: MessageType::Vote(my_vote.clone()),
+                            };
+                            tx[&vote.sender_id].send(vote_msg.clone());
+                        }
+
                         recv_set.insert(vote.sender_id, vote.clone());
-                        // println!("{} {:?}\n\n\n", self.id, recv_set);
+                        // println!("{} {:?}\n", self.id, recv_set);
                         // TODO: evaluate if there is yet a quorum voting for the same leader
                         match self.check_quorum(&recv_set) {
                             Some(x) => {
