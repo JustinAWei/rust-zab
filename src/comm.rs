@@ -9,7 +9,7 @@ pub trait BaseSender<T : Debug + Send + Clone>: Send + Clone + Debug {
 
 impl<T : Debug + Send + Clone> BaseSender<T> for mpsc::Sender<T> {
     fn send(& self, value : T) {
-        self.send(value).unwrap();
+        self.send(value);//.unwrap();
     }
 }
 
