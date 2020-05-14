@@ -37,7 +37,7 @@ pub enum MessageType {
     FollowerInfo(u64, String),
     LeaderInfo(u64),
     AckEpoch(u64, u64),
-    Snap(Vec<(u64, String)>),
+    Snap((Vec<(u64, String)>, u64)), // history, proposed epoch
     UpToDate,
     /*
     Diff(u64),
@@ -51,7 +51,7 @@ pub enum MessageType {
     // Inform(u64),
     //
     // Our message types
-    Vote(Vote),
+    Vote((Vote, bool)), // respond?
     ClientProposal(String),
     InternalTimeout(u64) // zxid of timed out transaction
 }

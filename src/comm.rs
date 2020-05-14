@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::time::Duration;
 use std::sync::{Arc, mpsc};
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::collections::HashMap;
@@ -8,24 +7,9 @@ pub trait BaseSender<T : Debug + Send + Clone>: Send + Clone + Debug {
     fn send(& self, value : T);
 }
 
-// pub trait BaseReceiver<T : Debug + Send + Clone> : Send {
-//     fn recv(& self) -> Option<T>;
-
-//     fn recv_timeout(& self, t : Duration) -> Option<T>;
-// }
-
-// pub fn get_unreliable_channel<T : Debug + Send + Clone> () -> (UnreliableSender<T>, mpsc::Receiver<T>) {
-//     let (sx, rx) = mpsc::channel();
-//     let u_sx = UnreliableSender{
-//         s : sx,
-//         ok : Arc::new(AtomicBool::new(true)),
-//     };
-//     (u_sx, rx)
-// }
-
 impl<T : Debug + Send + Clone> BaseSender<T> for mpsc::Sender<T> {
     fn send(& self, value : T) {
-        self.send(value);
+        self.send(value).unwrap();
     }
 }
 
@@ -39,7 +23,7 @@ pub struct UnreliableSender<T : Debug + Send + Clone> {
 impl<T : Debug + Send + Clone> BaseSender<T> for UnreliableSender<T> {
     fn send(& self, value : T) {
         if self.ok.load(Ordering::SeqCst) {
-            self.s.send(value);
+            self.s.send(value).unwrap();
         }
     }
 }
@@ -67,6 +51,7 @@ impl SenderController {
     pub fn new() -> SenderController {
         SenderController {s: HashMap::new()}
     }
+    
     pub fn register_sender<T : Debug + Send + Clone> (& mut self, sender: &UnreliableSender<T>, sender_id : u64, receiver_id : u64) {
         self.s.insert((sender_id, receiver_id), sender.ok.clone());
     }
