@@ -7,14 +7,39 @@ use timer;
 use chrono;
 use crate::election::LeaderElector;
 use crate::message::{MessageType, Message, NodeState};
-use crate::comm::{BaseSender, UnreliableSender};
+use crate::comm::{BaseSender, UnreliableSender, SenderController};
 
 const TXN_TIMEOUT_MS : i64 = 400;
 const PH1_TIMEOUT_MS : u64 = 1600;
 const PH2_TIMEOUT_MS : u64 = 1600;
 
-pub fn create_zab_ensemble(n_nodes : u32) -> (HashMap<id, Node>, SenderController){
-    
+pub fn create_zab_ensemble(n_nodes : u64) -> (HashMap<u64, Node<UnreliableSender<Message>>>, SenderController){
+
+    let mut senders : HashMap<u64, UnreliableSender<Message> > = HashMap::new();
+    let mut nodes : HashMap<u64, Node<UnreliableSender<Message>>> = HashMap::new();
+
+
+    // create channels and nodes
+    for i in 0..n_nodes {
+        let (s, r) = channel();
+        let us = UnreliableSender::new(s.clone());
+        let node = Node::new(i, n_nodes, false, s.clone(), r);
+        nodes.insert(i, node);
+    }
+
+    let mut controller = SenderController::new();
+    // register nodes
+    for sender_id in 0..n_nodes {
+        let x = senders.clone();
+        for (recv_id, s) in x {
+            // don't reg self
+            if sender_id != recv_id {
+                controller.register_sender(&s, sender_id, recv_id);
+            }
+        }
+    }
+
+    return (nodes, controller);
 }
 
 struct InflightTxn {
@@ -84,6 +109,7 @@ pub struct Node<T : BaseSender<Message>> {
 }
 
 impl<S : BaseSender<Message>> Node<S> {
+    // TODO: feifei fix tx param
     pub fn new(i: u64, cluster_size: u64, is_leader: bool, tx : Sender<Message>, rx : Receiver<Message>) -> Node<S> {
         assert!(cluster_size % 2 == 1);
         let quorum_size = (cluster_size + 1) / 2;

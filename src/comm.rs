@@ -67,6 +67,9 @@ pub struct SenderController {
 }
 
 impl SenderController {
+    pub fn new() -> SenderController {
+        SenderController {s: HashMap::new()}
+    }
     pub fn register_sender<T : Debug + Send> (& mut self, sender: &UnreliableSender<T>, sender_id : u64, receiver_id : u64) {
         self.s.insert((sender_id, receiver_id), sender.ok.clone());
     }
