@@ -59,8 +59,7 @@ impl LeaderElector {
         rx : & mut Receiver<Message>,
         tx : & mut HashMap<u64, T>,
         init_proposed_zab_epoch : u64,
-        last_zxid : u64,
-        quorum_size : u64
+        last_zxid : u64
     ) -> Option<(u64, u64)>
     {
         // println!("{} looking for leader\n", self.id);
@@ -74,7 +73,6 @@ impl LeaderElector {
         let mut recv_set        : HashMap<u64, Vote> = HashMap::new();
 
         recv_set.insert(self.id, my_vote.clone());
-        self.quorum_size = quorum_size;
         // broadcast self vote
         let vote_msg = Message {
             sender_id: self.id,
