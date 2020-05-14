@@ -179,6 +179,32 @@ impl<S : BaseSender<Message>> Node<S> {
         };
         match msg.msg_type {
             // TODO handle p1, p2 msgs
+            MessageType::FollowerInfo(e, _) => {
+                // respond to follower's phase 1 message
+                let msg = Message {
+                    msg_type: MessageType::LeaderInfo(self.epoch),
+                    sender_id: self.id,
+                    epoch: 0,
+                };
+                self.send(msg.sender_id, msg)
+            }
+
+            MessageType::AckEpoch(follower_z, _follower_epoch) => {
+                // respond to follower's phase 1 message
+                //  this will start follower's phase 2
+                self.sync_with_follower(msg.sender_id, follower_z, self.epoch);
+                // send sync immediately followed by an up to date - this will
+                //  ensure that no new commits are made by leader in between
+                // hopefully TCP and p2 ordering will prevent UpToDate from arriving
+                //  before sync
+                let msg = Message {
+                    msg_type: MessageType::UpToDate,
+                    sender_id: self.id,
+                    epoch: self.epoch,
+                };
+                self.send(msg.sender_id, msg);
+            }
+
             MessageType::ClientProposal(data) => {
                 let zxid = self.next_zxid;
                 self.next_zxid += 1;
@@ -366,7 +392,7 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_option = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
             if let Some(msg) = msg_option {
-                if let MessageType::FollowerInfo(e, txid) = msg.msg_type {
+                if let MessageType::FollowerInfo(e, _) = msg.msg_type {
                     if m.insert(msg.sender_id, true) == None {
                         last_recv = Instant::now();
                     }
@@ -471,7 +497,7 @@ impl<S : BaseSender<Message>> Node<S> {
     fn leader_p2(&mut self, connected_followers: HashMap<u64, u64>, proposed_epoch: u64) -> bool {
         // Sync follower logs with leader logs
         for (f_id, f_zxid) in connected_followers {
-            self.sync_with_follower(f_id, f_zxid, proposed_epoch);
+            self.sync_with_follower(f_id, f_zxid, self.epoch);
         }
 
         // Wait until quorum has acked the sync operation
