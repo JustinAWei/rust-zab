@@ -192,8 +192,7 @@ impl<S : BaseSender<Message>> Node<S> {
                         return None;
                     },
                     RecvTimeoutError::Disconnected => {
-                        // TODO: maybe panic instead
-                        return None;
+                        panic!("Node {} Disconnected\n", self.id);
                     },
                 }
             },
