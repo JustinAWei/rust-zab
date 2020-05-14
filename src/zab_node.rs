@@ -178,7 +178,7 @@ impl<S : BaseSender<Message>> Node<S> {
         self.handle_vote_msgs(m.clone());
         m
     }
-    
+
     fn receive_timeout(&self, t: Duration) -> Option<Message> {
         match self.rx.recv_timeout(t) {
             Ok(m) => {
@@ -271,6 +271,7 @@ impl<S : BaseSender<Message>> Node<S> {
 
                 if quorum_ack {
                     if zxid != self.committed_zxid + 1 {
+                        println!("(zxid {}, self.committed {}", zxid, self.committed_zxid);
                         panic!("leader missed a zxid");
                         // return;
                     }
@@ -306,7 +307,6 @@ impl<S : BaseSender<Message>> Node<S> {
     fn process_follower(&mut self, msg: Message) {
         let leader_id = msg.sender_id;
         match msg.msg_type {
-            
             // just forward client proposals to leader
             MessageType::ClientProposal(_) => {
                 self.send(self.leader.unwrap(), msg.clone());
@@ -315,7 +315,7 @@ impl<S : BaseSender<Message>> Node<S> {
             // TODO handle p1, p2 msgs
             MessageType::Proposal(zxid, data) => {
                 if zxid != self.next_zxid {
-                    println!("follower missed a zxid");
+                    println!("follower missed a zxid (msg zxid {}, self.next_zxid {}", zxid, self.next_zxid);
                     return;
                 }
                 self.next_zxid += 1;
@@ -364,7 +364,7 @@ impl<S : BaseSender<Message>> Node<S> {
                 NodeState::Looking => {
                     let result = self.leader_elector.look_for_leader(
                         & mut self.rx,
-                        & mut self.tx, 
+                        & mut self.tx,
                         self.epoch + 1,
                         self.committed_zxid);
                     if let Some((proposed_epoch, leader_id)) = result {
@@ -546,7 +546,7 @@ impl<S : BaseSender<Message>> Node<S> {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
                 if let MessageType::Ack(zxid) = msg.msg_type {
-                    assert!(zxid == proposed_epoch << 32, "{} != {} << 32", zxid, proposed_epoch);
+                    assert!(zxid == self.committed_zxid + 1, "{} != {}", zxid, self.committed_zxid + 1);
                     if acks.insert(msg.sender_id) {
                         last_recv = Instant::now();
                     }
@@ -562,7 +562,8 @@ impl<S : BaseSender<Message>> Node<S> {
         }
         self.leader = Some(self.id);
         self.epoch = proposed_epoch;
-        self.next_zxid = (self.epoch << 32) + 1;
+        self.committed_zxid += 1;
+        self.next_zxid = self.committed_zxid + 1;
         self.state = NodeState::Leading;
 
         // Send up to date to all acked followers
@@ -590,10 +591,12 @@ impl<S : BaseSender<Message>> Node<S> {
                         } else {
                             self.committed_zxid = 0;
                         }
+                        self.committed_zxid += 1;
+                        self.next_zxid = self.committed_zxid + 1;
                         self.epoch = proposed_epoch;
                         self.zab_log.commit_log = commit_log;
                         let ack_msg = Message {
-                            msg_type: MessageType::Ack(self.epoch << 32),
+                            msg_type: MessageType::Ack(self.committed_zxid),
                             sender_id: self.id,
                             epoch: self.epoch,
                         };
