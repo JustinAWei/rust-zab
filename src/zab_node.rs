@@ -156,7 +156,7 @@ impl<S : BaseSender<Message>> Node<S> {
     }
 
     fn handle_vote_msgs(&self, msg : Message) {
-        if let MessageType::Vote((v, needs_reply)) = msg.msg_type {
+        if let MessageType::Vote((_v, needs_reply)) = msg.msg_type {
             if needs_reply {
                 if self.state == NodeState::Looking {
                     self.leader_elector.send_last_vote(self.epoch, self.state, &self.tx[&msg.sender_id]);

@@ -1,12 +1,10 @@
-use std::sync::mpsc::{Receiver, channel, RecvTimeoutError};
 use std::thread;
-use std::collections::{HashSet, HashMap};
 pub mod election;
 pub mod message;
 pub mod comm;
 pub mod zab_node;
-use zab_node::{Node, create_zab_ensemble};
-use message::{MessageType, Message};
+use zab_node::create_zab_ensemble;
+// use message::{MessageType, Message};
 
 fn main() {
     println!("hello world!");
@@ -15,7 +13,7 @@ fn main() {
     let mut handles = Vec::new();
 
     // start them up
-    for (node_id, mut node) in nodes {
+    for (_node_id, mut node) in nodes {
         let handle = thread::spawn(move || {
             node.main_loop();
         });
