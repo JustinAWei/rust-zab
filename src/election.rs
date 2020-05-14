@@ -106,7 +106,7 @@ impl LeaderElector {
                     if vote.election_epoch == self.election_epoch
                     {
                         recv_set.insert(vote.sender_id, vote.clone());
-                        println!("{} {:?}\n\n\n", self.id, recv_set);
+                        // println!("{} {:?}\n\n\n", self.id, recv_set);
                         // TODO: evaluate if there is yet a quorum voting for the same leader
                         match self.check_quorum(&recv_set) {
                             Some(x) => {
@@ -161,7 +161,7 @@ impl LeaderElector {
             }
         }
 
-        println!("{} {} {}", self.id, new_leader, highest_votes);
+        // println!("{} {} {}", self.id, new_leader, highest_votes);
         // quorum check
         if highest_votes >= self.quorum_size {
             // new leader is elected
