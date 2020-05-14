@@ -22,13 +22,13 @@ fn is_vote_msg(msg : & Message) -> (bool, Vote) {
 // returns true if vote contains better leader
 // (assuming both vote's sender and I am in the same election round)
 fn is_candidate_better(my_vote : &Vote, new_vote : &Vote,) -> bool {
-    if new_vote.zab_epoch > my_vote.zab_epoch{
+    if new_vote.zab_epoch > my_vote.zab_epoch {
         return true;
     } else if new_vote.zab_epoch == my_vote.zab_epoch {
         if new_vote.zxid > my_vote.zxid  {
             return true
         } else if new_vote.zxid == my_vote.zxid &&
-                     new_vote.sender_id > my_vote.sender_id {
+                     new_vote.leader > my_vote.leader {
             // use sender_id tiebreaker
             return true
         }
@@ -105,8 +105,8 @@ impl LeaderElector {
 
                     if vote.election_epoch == self.election_epoch
                     {
-                        println!("recieved our on the same epoch!");
                         recv_set.insert(vote.sender_id, vote.clone());
+                        println!("{} {:?}\n\n\n", self.id, recv_set);
                         // TODO: evaluate if there is yet a quorum voting for the same leader
                         match self.check_quorum(&recv_set) {
                             Some(x) => {
@@ -117,8 +117,6 @@ impl LeaderElector {
                         };
 
                         if is_candidate_better(&my_vote, &vote) {
-                            println!("candidate better!");
-
                             proposed_zab_epoch = vote.zab_epoch;
                             my_vote = vote.clone();
                             my_vote.sender_id = self.id;
@@ -127,7 +125,7 @@ impl LeaderElector {
                             let vote_msg = Message {
                                 sender_id: self.id,
                                 epoch: proposed_zab_epoch,
-                                msg_type: MessageType::Vote(my_vote),
+                                msg_type: MessageType::Vote(my_vote.clone()),
                             };
                             self.broadcast(tx, vote_msg);
                         }
@@ -142,9 +140,6 @@ impl LeaderElector {
 
                 }
             }
-
-            return None;
-
         }
     }
 
@@ -158,15 +153,17 @@ impl LeaderElector {
         }
 
         let mut new_leader = 0;
-        let highest_votes = 0;
+        let mut highest_votes = 0;
         for ((_, candidate), count) in counts {
             if highest_votes < count {
                 new_leader = candidate;
+                highest_votes = count;
             }
         }
 
+        println!("{} {} {}", self.id, new_leader, highest_votes);
         // quorum check
-        if highest_votes >= self.quorum_size / 2 {
+        if highest_votes >= self.quorum_size {
             // new leader is elected
             Some(new_leader)
         }

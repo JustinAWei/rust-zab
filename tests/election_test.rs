@@ -5,14 +5,25 @@ use zookeeper::election::LeaderElector;
 use zookeeper::message::{MessageType, Message, NodeState};
 use std::thread;
 
+// #[test]
+// fn one_election() {
+//     n_election(vec![(0,0,0,0)], Some((0,0)));
+// }
+
 #[test]
-fn one_election() {
-    n_election(vec![(0,0,0,0)], Some((0,0)));
+fn three_election() {
+    n_election(vec![(0,0,0,0), (1,0,0,0), (2,0,0,0)], Some((0,2)));
+}
+
+#[test]
+fn five_election() {
+    n_election(vec![(0,0,0,0), (1,0,0,0), (2,0,0,0), (3,0,0,0), (4,0,0,0)], Some((0,4)));
 }
 
 fn n_election(params: Vec<(u64, u64, u64, u64)>, expected_result: Option<(u64, u64)>) {
     let n = params.len() as u64;
-    let quorum_size = n / 2 + 1;
+    let quorum_size = n;
+    // let quorum_size = n / 2 + 1;
 
     let mut senders : HashMap<u64, Sender<Message>> = HashMap::new();
     let mut electors : HashMap<u64, LeaderElector> = HashMap::new();
