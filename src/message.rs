@@ -52,6 +52,7 @@ pub enum MessageType {
     //
     // Our message types
     Vote((Vote, bool)), // respond?
+    ClientQuery,
     ClientProposal(String),
     InternalTimeout(u64) // zxid of timed out transaction
 }

@@ -80,7 +80,6 @@ impl ZabLog {
         serde_json::to_writer(&mut self.lf, &entry).unwrap();
         writeln!(&mut self.lf).unwrap();
         self.lf.flush().unwrap();
-
     }
 
     pub fn record_commit(&mut self, zxid: u64, data: String) {
@@ -91,7 +90,10 @@ impl ZabLog {
         serde_json::to_writer(&mut self.lf, &entry).unwrap();
         writeln!(&mut self.lf).unwrap();
         self.lf.flush().unwrap();
+    }
 
+    pub fn latest_commit(&mut self) -> (u64, String) {
+        return self.commit_log[self.commit_log.len() - 1].clone();
     }
 }
 
@@ -257,6 +259,12 @@ impl<S : BaseSender<Message>> Node<S> {
                     }
                 }
             },
+
+            MessageType::ClientQuery => {
+                let (zxid, data) = self.zab_log.latest_commit();
+                println!("value at node {}, zxid {}: {}", self.id, zxid, data);
+            },
+
             MessageType::Ack(zxid) => {
                 let mut quorum_ack : bool = false;
                 match self.inflight_txns.get_mut(&zxid) {
@@ -310,6 +318,10 @@ impl<S : BaseSender<Message>> Node<S> {
             // just forward client proposals to leader
             MessageType::ClientProposal(_) => {
                 self.send(self.leader.unwrap(), msg.clone());
+            },
+            MessageType::ClientQuery => {
+                let (zxid, data) = self.zab_log.latest_commit();
+                println!("value at node {}, zxid {}: {}", self.id, zxid, data);
             },
 
             // TODO handle p1, p2 msgs

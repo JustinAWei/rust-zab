@@ -1,4 +1,4 @@
-use std::thread;
+use std::{thread, time};
 pub mod election;
 pub mod message;
 pub mod comm;
@@ -26,11 +26,24 @@ fn main() {
         msg_type: MessageType::ClientProposal(String::from("suhh")),
     };
 
-    for _ in 0..100000000 {
-    }
+    let t = time::Duration::from_millis(5000);
+    thread::sleep(t);
+
     for i in 0..1 {
         println!("client proposal!");
         _senders[&i].send(proposal.clone()).expect("nahh");
+    }
+
+    thread::sleep(t);
+
+    let query = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientQuery,
+    };
+
+    for (_, sender) in _senders {
+        sender.send(query.clone()).expect("query failed :(");
     }
 
     for handle in handles {
