@@ -30,22 +30,42 @@ fn three_zab_epoch_cmp_3() {
 }
 
 #[test]
-fn three_zab_epoch_cmp_4() {
+fn three_zab_epoch_cmp_1a() {
     n_election(vec![(0,0,2,2), (1,0,3,50), (2,0,1,20)], Some((3,1)));
 }
 
 #[test]
-fn three_zab_epoch_cmp_5() {
+fn three_zab_epoch_cmp_2a() {
     n_election(vec![(0,0,4,10), (1,0,3,120), (2,0,1,4)], Some((4,0)));
 }
 
 #[test]
-fn three_zab_epoch_cmp_6() {
-    n_election(vec![(0,0,2,1), (1,0,3,2), (2,0,5,3)], Some((5,2)));
+fn three_zab_epoch_cmp_3a() {
+    n_election(vec![(21340,0,2,1), (64321,0,3,2), (2,0,5,3)], Some((5,2)));
 }
 
 #[test]
-fn three_zab_epoch_cmp_7() {
+fn three_zab_epoch_cmp_4a() {
+    n_election(vec![(0,0,3,76), (12341,0,3,23), (7652,0,2,1111)], Some((3,0)));
+}
+
+#[test]
+fn three_zab_epoch_cmp_1aa() {
+    n_election(vec![(65340,0,2,2), (1,0,3,50), (21342,0,1,20)], Some((3,1)));
+}
+
+#[test]
+fn three_zab_epoch_cmp_2aa() {
+    n_election(vec![(0,0,4,10), (1674,0,3,120), (1232,0,1,4)], Some((4,0)));
+}
+
+#[test]
+fn three_zab_epoch_cmp_3aa() {
+    n_election(vec![(440,0,2,1), (991,0,3,2), (2,0,5,3)], Some((5,2)));
+}
+
+#[test]
+fn three_zab_epoch_cmp_4aa() {
     n_election(vec![(0,0,3,76), (1,0,3,23), (2,0,2,1111)], Some((3,0)));
 }
 
@@ -68,6 +88,27 @@ fn three_zxid_cmp_2() {
 #[test]
 fn three_zxid_cmp_3() {
     n_election(vec![(0,0,0,1), (1,0,0,2), (2,0,0,1)], Some((0,1)));
+}
+
+// cmp zxid
+#[test]
+fn three_zxid_cmp_0a() {
+    n_election(vec![(0,0,0,2), (131244,0,0,0), (12342,0,0,0)], Some((0,0)));
+}
+
+#[test]
+fn three_zxid_cmp_1a() {
+    n_election(vec![(650,0,0,2), (1,0,0,3), (12342,0,0,0)], Some((0,1)));
+}
+
+#[test]
+fn three_zxid_cmp_2a() {
+    n_election(vec![(32140,0,0,2), (23421,0,0,1), (2,0,0,4)], Some((0,2)));
+}
+
+#[test]
+fn three_zxid_cmp_3a() {
+    n_election(vec![(12340,0,0,1), (1,0,0,2), (5682,0,0,1)], Some((0,1)));
 }
 
 // cmp on id
