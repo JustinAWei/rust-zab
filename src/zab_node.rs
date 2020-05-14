@@ -13,9 +13,14 @@ const TXN_TIMEOUT_MS : i64 = 400;
 const PH1_TIMEOUT_MS : u64 = 1600;
 const PH2_TIMEOUT_MS : u64 = 1600;
 
-pub fn create_zab_ensemble(n_nodes : u64) -> (HashMap<u64, Node<UnreliableSender<Message>>>, SenderController){
+pub fn create_zab_ensemble(n_nodes : u64)
+    -> (HashMap<u64, Node<UnreliableSender<Message>>>,
+        HashMap<u64, Sender<Message>>,
+        SenderController)
+{
 
-    let mut senders : HashMap<u64, UnreliableSender<Message> > = HashMap::new();
+    let mut senders : HashMap<u64, Sender<Message>> = HashMap::new();
+    let mut u_senders : HashMap<u64, UnreliableSender<Message> > = HashMap::new();
     let mut nodes : HashMap<u64, Node<UnreliableSender<Message>>> = HashMap::new();
 
     // create channels and nodes
@@ -24,14 +29,15 @@ pub fn create_zab_ensemble(n_nodes : u64) -> (HashMap<u64, Node<UnreliableSender
         let us = UnreliableSender::new(s.clone());
         let node = Node::new(i, n_nodes, s.clone(), r);
         nodes.insert(i, node);
-        senders.insert(i, us);
+        u_senders.insert(i, us);
+        senders.insert(i, s);
     }
 
     let mut controller = SenderController::new();
     // register nodes
     for sender_id in 0..n_nodes {
         let n : & mut Node<UnreliableSender<Message>> = nodes.get_mut(&sender_id).unwrap();
-        for (recv_id, s) in &senders {
+        for (recv_id, s) in &u_senders {
             // don't reg self
             if sender_id != *recv_id {
                 let node_s = UnreliableSender::from(s);
@@ -41,7 +47,7 @@ pub fn create_zab_ensemble(n_nodes : u64) -> (HashMap<u64, Node<UnreliableSender
         }
     }
 
-    return (nodes, controller);
+    return (nodes, senders, controller);
 }
 
 struct InflightTxn {
@@ -141,6 +147,9 @@ impl<S : BaseSender<Message>> Node<S> {
 
     fn send(&self, id: u64, msg: Message) {
         println!("node {} sending {:?} to {}", self.id, msg, id);
+        if self.tx.contains_key(&id) == false {
+            panic!("node {} cannot find {} in {:?}", self.id, id, self.tx);
+        }
         self.tx[&id].send(msg);
         //println!("send successful");
     }
@@ -175,7 +184,8 @@ impl<S : BaseSender<Message>> Node<S> {
 
     fn process_leader(&mut self, msg: Message) {
         if msg.epoch != self.epoch {
-            println!("~~~bad things have happened, ooh spooky~~~");
+            // note : this might happen for followerinfo, vote, etc
+            println!("~~~bad things have happened, ooh spooky~~~ sender_e = {} my_e = {}", msg.epoch, self.epoch);
         };
         match msg.msg_type {
             // TODO handle p1, p2 msgs
@@ -339,11 +349,16 @@ impl<S : BaseSender<Message>> Node<S> {
                         & mut self.tx, 
                         self.epoch + 1,
                         self.committed_zxid);
-                    if let Some((leader_id, proposed_epoch)) = result {
+                    if let Some((proposed_epoch, leader_id)) = result {
+                        if !(leader_id == self.id || self.tx.contains_key(&leader_id)) {
+                            panic!("Node {} got {} leader, but {} node does not exist", self.id, leader_id, leader_id)
+                        }
                         if leader_id == self.id {
+                            println!("\n\n >> {} is leader!", self.id);
                             // I'm leader candidate!
                             let result = self.leader_p1(proposed_epoch);
                             if let Some(connected_followers) = result {
+                                println!("\n\n >> {} ldr_p1 ok!", self.id);
                                 // self.state changed here if p2 successful
                                 self.leader_p2(connected_followers, proposed_epoch);
                             }
@@ -358,6 +373,11 @@ impl<S : BaseSender<Message>> Node<S> {
                     // if self.state has not been changed,
                     //  something failed, state is still looking and we will
                     //  call look_for_leader again in next iteration
+                    println!("{} state now {:?} ", self.id, self.state);
+                    if (self.state == NodeState::Looking) {
+                         // just leave so we can debug T.T
+                        break;
+                    }
                 },
                 NodeState::Leading => {
                     let msg = self.receive();
@@ -402,7 +422,8 @@ impl<S : BaseSender<Message>> Node<S> {
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
-                // timeout when waiting for a quorum of followers to ACK
+                // timeout when waiting for a quorum of followers to send FollowerInfo
+                println!("  > ldr timeout when wait for FollowerInfo");
                 return None;
             }
         }
@@ -426,10 +447,12 @@ impl<S : BaseSender<Message>> Node<S> {
                     // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
                     // f.currentEpoch <= l.currentEpoch
                     if !(follower_epoch <= self.epoch) {
+                        println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
                     if follower_epoch == self.epoch && !(follower_z <= self.committed_zxid) {
+                        println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     if m.insert(msg.sender_id, follower_z) == None {
@@ -442,6 +465,7 @@ impl<S : BaseSender<Message>> Node<S> {
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to ACK
+                println!("  > ldr timeout when wait for AckEpoch");
                 return None;
             }
         }
@@ -467,7 +491,6 @@ impl<S : BaseSender<Message>> Node<S> {
                     if leaderinfo.sender_id == leader_id {
                         // if e > f.acceptedEpoch, the follower sets f.acceptedEpoch = e and sends ACKEPOCH(e);
                         if e > self.epoch {
-                            self.epoch = e;
                             let msg = Message {
                                 msg_type: MessageType::AckEpoch(self.committed_zxid, self.epoch),
                                 sender_id: self.id,
@@ -507,7 +530,7 @@ impl<S : BaseSender<Message>> Node<S> {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
                 if let MessageType::Ack(zxid) = msg.msg_type {
-                    assert!(zxid == (proposed_epoch) << 32);
+                    assert!(zxid == self.committed_zxid, "{} != {}", zxid, self.committed_zxid);
                     if acks.insert(msg.sender_id) {
                         last_recv = Instant::now();
                     }
@@ -545,11 +568,14 @@ impl<S : BaseSender<Message>> Node<S> {
             if let Some(msg) = msg_option {
                 if let MessageType::Snap(commit_log) = msg.msg_type {
                     if msg.sender_id == leader_id {
+                        if commit_log.len() > 0 {
+                            self.committed_zxid = commit_log[commit_log.len() - 1].0;
+                        } else {
+                            self.committed_zxid = 0;
+                        }
                         self.zab_log.commit_log = commit_log;
-                        self.epoch = msg.epoch;
-                        self.next_zxid = (self.epoch << 32) + 1;
                         let ack_msg = Message {
-                            msg_type: MessageType::Ack(self.epoch << 32),
+                            msg_type: MessageType::Ack(self.committed_zxid),
                             sender_id: self.id,
                             epoch: self.epoch,
                         };
