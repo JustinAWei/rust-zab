@@ -206,6 +206,7 @@ fn n_election(params: Vec<(u64, u64, u64, u64)>, expected_result: Option<(u64, u
         let mut senders_cpy = senders.clone();
         let handle = thread::spawn(move || {
             let mut r = None;
+            senders_cpy.remove(&id).unwrap();
             while r.is_none() {
                 r = electors_cpy.look_for_leader(&mut receivers_cpy, &mut senders_cpy, init_proposed_zab_epoch, last_zxid, quorum_size);
             }

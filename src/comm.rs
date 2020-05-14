@@ -4,17 +4,17 @@ use std::sync::{Arc, mpsc};
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::collections::HashMap;
 
-pub trait BaseSender<T : Debug + Send>: Send + Clone + Debug {
+pub trait BaseSender<T : Debug + Send + Clone>: Send + Clone + Debug {
     fn send(& self, value : T);
 }
 
-// pub trait BaseReceiver<T : Debug + Send> : Send {
+// pub trait BaseReceiver<T : Debug + Send + Clone> : Send {
 //     fn recv(& self) -> Option<T>;
 
 //     fn recv_timeout(& self, t : Duration) -> Option<T>;
 // }
 
-// pub fn get_unreliable_channel<T : Debug + Send> () -> (UnreliableSender<T>, mpsc::Receiver<T>) {
+// pub fn get_unreliable_channel<T : Debug + Send + Clone> () -> (UnreliableSender<T>, mpsc::Receiver<T>) {
 //     let (sx, rx) = mpsc::channel();
 //     let u_sx = UnreliableSender{
 //         s : sx,
@@ -23,20 +23,20 @@ pub trait BaseSender<T : Debug + Send>: Send + Clone + Debug {
 //     (u_sx, rx)
 // }
 
-impl<T : Debug + Send> BaseSender<T> for mpsc::Sender<T> {
+impl<T : Debug + Send + Clone> BaseSender<T> for mpsc::Sender<T> {
     fn send(& self, value : T) {
         self.send(value);
     }
 }
 
 // channel could drop messages
-#[derive(Debug)]
-pub struct UnreliableSender<T : Debug + Send> {
+#[derive(Debug, Clone)]
+pub struct UnreliableSender<T : Debug + Send + Clone> {
     s : mpsc::Sender<T>,
     pub ok : Arc<AtomicBool>
 }
 
-impl<T : Debug + Send> BaseSender<T> for UnreliableSender<T> {
+impl<T : Debug + Send + Clone> BaseSender<T> for UnreliableSender<T> {
     fn send(& self, value : T) {
         if self.ok.load(Ordering::SeqCst) {
             self.s.send(value);
@@ -44,19 +44,16 @@ impl<T : Debug + Send> BaseSender<T> for UnreliableSender<T> {
     }
 }
 
-impl<T : Debug + Send> Clone for UnreliableSender<T> {
-    fn clone(&self) -> UnreliableSender<T> {
-        UnreliableSender{
-            s : self.s.clone(),
-            ok : Arc::new(AtomicBool::new(true)),
-        }
-    }
-}
-
-impl<T : Debug + Send> UnreliableSender<T> {
+impl<T : Debug + Send + Clone> UnreliableSender<T> {
     pub fn new(s : mpsc::Sender<T>) -> UnreliableSender<T> {
         UnreliableSender{
             s : s,
+            ok : Arc::new(AtomicBool::new(true)),
+        }
+    }
+    pub fn from(s : &UnreliableSender<T>) -> UnreliableSender<T> {
+        UnreliableSender{
+            s : s.s.clone(),
             ok : Arc::new(AtomicBool::new(true)),
         }
     }
@@ -70,7 +67,7 @@ impl SenderController {
     pub fn new() -> SenderController {
         SenderController {s: HashMap::new()}
     }
-    pub fn register_sender<T : Debug + Send> (& mut self, sender: &UnreliableSender<T>, sender_id : u64, receiver_id : u64) {
+    pub fn register_sender<T : Debug + Send + Clone> (& mut self, sender: &UnreliableSender<T>, sender_id : u64, receiver_id : u64) {
         self.s.insert((sender_id, receiver_id), sender.ok.clone());
     }
 

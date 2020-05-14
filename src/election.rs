@@ -73,6 +73,7 @@ impl LeaderElector {
                                             NodeState::Looking);
         let mut recv_set        : HashMap<u64, Vote> = HashMap::new();
 
+        recv_set.insert(self.id, my_vote.clone());
         self.quorum_size = quorum_size;
         // broadcast self vote
         let vote_msg = Message {
@@ -135,6 +136,7 @@ impl LeaderElector {
                             proposed_zab_epoch = vote.zab_epoch;
                             my_vote = vote.clone();
                             my_vote.sender_id = self.id;
+                            recv_set.insert(self.id, my_vote.clone());
 
                             // send my_vote to all peers
                             let vote_msg = Message {
