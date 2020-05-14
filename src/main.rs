@@ -4,7 +4,7 @@ pub mod message;
 pub mod comm;
 pub mod zab_node;
 use zab_node::create_zab_ensemble;
-// use message::{MessageType, Message};
+use message::{MessageType, Message, NodeState};
 
 fn main() {
     println!("hello world!");
@@ -20,15 +20,18 @@ fn main() {
         handles.push(handle);
     }
     
-    // let proposal = Message {
-    //     sender_id: 0,
-    //     epoch: 0,
-    //     msg_type: MessageType::ClientProposal(String::from("suhh")),
-    // };
-    // 
-    // for _ in 0..5 {
-    //     leader_channel.send(proposal.clone()).expect("nahh");
-    // }
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("suhh")),
+    };
+
+    for _ in 0..100000000 {
+    }
+    for i in 0..1 {
+        println!("client proposal!");
+        _senders[&i].send(proposal.clone()).expect("nahh");
+    }
 
     for handle in handles {
         handle.join().unwrap();

@@ -102,7 +102,7 @@ pub struct Node<T : BaseSender<Message>> {
     pub id: u64,
     cluster_size: u64,
     quorum_size: u64,
-    state: NodeState,
+    pub state: NodeState,
     leader: Option<u64>,
     epoch: u64,
     // TODO why dis i
@@ -250,6 +250,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     epoch: self.epoch,
                     msg_type: MessageType::Proposal(zxid, data),
                 };
+                println!("{:?}\n", send_msg);
                 for id in 0..self.cluster_size {
                     if id != self.id {
                         self.send(id, send_msg.clone());
@@ -305,6 +306,12 @@ impl<S : BaseSender<Message>> Node<S> {
     fn process_follower(&mut self, msg: Message) {
         let leader_id = msg.sender_id;
         match msg.msg_type {
+            
+            // just forward client proposals to leader
+            MessageType::ClientProposal(_) => {
+                self.send(self.leader.unwrap(), msg.clone());
+            },
+
             // TODO handle p1, p2 msgs
             MessageType::Proposal(zxid, data) => {
                 if zxid != self.next_zxid {
