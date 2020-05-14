@@ -97,7 +97,6 @@ pub struct Node<T : BaseSender<Message>> {
     cluster_size: u64,
     quorum_size: u64,
     state: NodeState,
-    leader: bool,
     epoch: u64,
     // TODO why dis i
     committed_zxid: u64,
@@ -119,7 +118,6 @@ impl<S : BaseSender<Message>> Node<S> {
             cluster_size: cluster_size,
             quorum_size: quorum_size,
             state: NodeState::Looking,
-            leader: is_leader,
             epoch: 0,
             committed_zxid: 0,
             next_zxid: 1,
@@ -172,14 +170,6 @@ impl<S : BaseSender<Message>> Node<S> {
                     },
                 }
             },
-        }
-    }
-
-    fn process(&mut self, msg: Message) {
-        if self.leader {
-            self.process_leader(msg);
-        } else {
-            self.process_follower(msg);
         }
     }
 
@@ -316,8 +306,42 @@ impl<S : BaseSender<Message>> Node<S> {
 
     pub fn main_loop(&mut self) {
         loop {
-            let msg = self.receive();
-            self.process(msg);
+            match self.state {
+                NodeState::Looking => {
+                    let result = self.leader_elector.look_for_leader(
+                        & mut self.rx,
+                        & mut self.tx, 
+                        self.epoch + 1,
+                        self.committed_zxid);
+                    if let Some((leader_id, proposed_epoch)) = result {
+                        if leader_id == self.id {
+                            // I'm leader candidate!
+                            let result = self.leader_p1(proposed_epoch);
+                            if let Some(connected_followers) = result {
+                                // self.state changed here if p2 successful
+                                self.leader_p2(connected_followers, proposed_epoch);
+                            }
+                        } else {
+                            // I'm a follower!
+                            if self.follower_p1(leader_id) {
+                                // self.state changed here if p2 successful
+                                self.follower_p2(leader_id);
+                            }
+                        }
+                    }
+                    // if self.state has not been changed,
+                    //  something failed, state is still looking and we will
+                    //  call look_for_leader again in next iteration
+                },
+                NodeState::Leading => {
+                    let msg = self.receive();
+                    self.process_leader(msg);
+                },
+                NodeState::Following => {
+                    let msg = self.receive();
+                    self.process_follower(msg);
+                }
+            }
         }
     }
 
@@ -334,7 +358,8 @@ impl<S : BaseSender<Message>> Node<S> {
         )
     }
 
-    fn leader_p1(&mut self, le_epoch: u64) -> bool {
+    // returns a hashmap of followers and their last committed zxid if successful
+    fn leader_p1(&mut self, le_epoch: u64) -> Option<HashMap<u64, u64>> {
         // wait for quorum FOLLOWERINFO
         let mut m : HashMap<u64, bool> = HashMap::new();
         let mut last_recv = Instant::now();
@@ -352,7 +377,7 @@ impl<S : BaseSender<Message>> Node<S> {
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to ACK
-                return false;
+                return None;
             }
         }
 
@@ -366,7 +391,7 @@ impl<S : BaseSender<Message>> Node<S> {
         self.broadcast(msg);
 
         // The leader waits for a quorum of followers to send ACKEPOCH.
-        let mut m : HashMap<u64, bool> = HashMap::new();
+        let mut m : HashMap<u64, u64> = HashMap::new();
         last_recv = Instant::now();
         loop {
             let msg_timeout = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
@@ -375,23 +400,23 @@ impl<S : BaseSender<Message>> Node<S> {
                     // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
                     // f.currentEpoch <= l.currentEpoch
                     if !(follower_epoch <= self.epoch) {
-                        return false;
+                        return None;
                     }
                     // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
                     if follower_epoch == self.epoch && !(follower_z <= self.committed_zxid) {
-                        return false;
+                        return None;
                     }
-                    if m.insert(msg.sender_id, true) == None {
+                    if m.insert(msg.sender_id, follower_z) == None {
                         last_recv = Instant::now();
                     }
                     if m.len() >= self.quorum_size as usize {
-                        return true;
+                        return Some(m);
                     }
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to ACK
-                return false;
+                return None;
             }
         }
 
@@ -413,23 +438,25 @@ impl<S : BaseSender<Message>> Node<S> {
 
             if let Some(leaderinfo) = leaderinfo_option  {
                 if let MessageType::LeaderInfo(e) = leaderinfo.msg_type {
-                    // if e > f.acceptedEpoch, the follower sets f.acceptedEpoch = e and sends ACKEPOCH(e);
-                    if e > self.epoch {
-                        self.epoch = e;
-                        let msg = Message {
-                            msg_type: MessageType::AckEpoch(self.committed_zxid, self.epoch),
-                            sender_id: self.id,
-                            epoch: 0,
-                        };
-                        self.send(leader_id, msg);
-                    } else if e == self.epoch {
-                        // if e == f.acceptedEpoch, the follower does not send ACKEPOCH, but continues to next step;
-                    } else if e < self.epoch {
-                        // if e < f.acceptedEpoch,
-                        // follower closes the connection to the leader and goes back to leader election;
-                        return false;
+                    if leaderinfo.sender_id == leader_id {
+                        // if e > f.acceptedEpoch, the follower sets f.acceptedEpoch = e and sends ACKEPOCH(e);
+                        if e > self.epoch {
+                            self.epoch = e;
+                            let msg = Message {
+                                msg_type: MessageType::AckEpoch(self.committed_zxid, self.epoch),
+                                sender_id: self.id,
+                                epoch: 0,
+                            };
+                            self.send(leader_id, msg);
+                        } else if e == self.epoch {
+                            // if e == f.acceptedEpoch, the follower does not send ACKEPOCH, but continues to next step;
+                        } else if e < self.epoch {
+                            // if e < f.acceptedEpoch,
+                            // follower closes the connection to the leader and goes back to leader election;
+                            return false;
+                        }
+                        return true;
                     }
-                    return true;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -439,6 +466,8 @@ impl<S : BaseSender<Message>> Node<S> {
         }
     }
 
+    // params:
+    //  connected_followers  : key = nodeid, val = last_zxid
     fn leader_p2(&mut self, connected_followers: HashMap<u64, u64>, proposed_epoch: u64) -> bool {
         // Sync follower logs with leader logs
         for (f_id, f_zxid) in connected_followers {
@@ -482,23 +511,25 @@ impl<S : BaseSender<Message>> Node<S> {
         return true;
     }
 
-    fn follower_p2(&mut self) -> bool {
+    fn follower_p2(&mut self, leader_id : u64) -> bool {
         // Waits for synchronization message
         let last_recv = Instant::now();
         loop {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
                 if let MessageType::Snap(commit_log) = msg.msg_type {
-                    self.zab_log.commit_log = commit_log;
-                    self.epoch = msg.epoch;
-                    self.next_zxid = (self.epoch << 32) + 1;
-                    let ack_msg = Message {
-                        msg_type: MessageType::Ack(self.epoch << 32),
-                        sender_id: self.id,
-                        epoch: self.epoch,
-                    };
-                    self.send(msg.sender_id, ack_msg);
-                    break;
+                    if msg.sender_id == leader_id {
+                        self.zab_log.commit_log = commit_log;
+                        self.epoch = msg.epoch;
+                        self.next_zxid = (self.epoch << 32) + 1;
+                        let ack_msg = Message {
+                            msg_type: MessageType::Ack(self.epoch << 32),
+                            sender_id: self.id,
+                            epoch: self.epoch,
+                        };
+                        self.send(msg.sender_id, ack_msg);
+                        break;
+                    }
                 }
             };
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -512,7 +543,7 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
-                if msg.msg_type == MessageType::UpToDate {
+                if msg.sender_id == leader_id && msg.msg_type == MessageType::UpToDate {
                     break;
                 }
             };
