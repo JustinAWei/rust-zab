@@ -103,6 +103,7 @@ pub struct Node<T : BaseSender<Message>> {
     cluster_size: u64,
     quorum_size: u64,
     state: NodeState,
+    leader: Option<u64>,
     epoch: u64,
     // TODO why dis i
     committed_zxid: u64,
@@ -124,6 +125,7 @@ impl<S : BaseSender<Message>> Node<S> {
             cluster_size: cluster_size,
             quorum_size: quorum_size,
             state: NodeState::Looking,
+            leader: None,
             epoch: 0,
             committed_zxid: 0,
             next_zxid: 1,
@@ -146,26 +148,42 @@ impl<S : BaseSender<Message>> Node<S> {
     }
 
     fn send(&self, id: u64, msg: Message) {
-        println!("node {} sending {:?} to {}", self.id, msg, id);
+        //println!("node {} sending {:?} to {}", self.id, msg, id);
         if self.tx.contains_key(&id) == false {
             panic!("node {} cannot find {} in {:?}", self.id, id, self.tx);
         }
         self.tx[&id].send(msg);
-        //println!("send successful");
+    }
+
+    fn handle_vote_msgs(&self, msg : Message) {
+        if let MessageType::Vote((v, needs_reply)) = msg.msg_type {
+            if needs_reply {
+                if self.state == NodeState::Looking {
+                    self.leader_elector.send_last_vote(self.epoch, self.state, &self.tx[&msg.sender_id]);
+                } else {
+                    self.leader_elector.invite_straggler(
+                        self.leader.unwrap(),
+                        self.committed_zxid,
+                        self.epoch,
+                        self.state,
+                        &self.tx[&msg.sender_id]);
+                }
+            }
+        }
     }
 
     fn receive(&self) -> Message {
-        //println!("node {} receiving...", self.id);
         let m = self.rx.recv().unwrap();
-        println!("node {} received {:?}", self.id, m);
+        // println!("node {} received {:?}", self.id, m);
+        self.handle_vote_msgs(m.clone());
         m
     }
     
     fn receive_timeout(&self, t: Duration) -> Option<Message> {
-        //println!("node {} receiving...", self.id);
         match self.rx.recv_timeout(t) {
             Ok(m) => {
-                println!("node {} received {:?}", self.id, m);
+                // println!("node {} received {:?}", self.id, m);
+                self.handle_vote_msgs(m.clone());
                 return Some(m);
             },
             Err(err) => {
@@ -191,12 +209,12 @@ impl<S : BaseSender<Message>> Node<S> {
             // TODO handle p1, p2 msgs
             MessageType::FollowerInfo(_fepoch, _) => {
                 // respond to follower's phase 1 message
-                let msg = Message {
+                let new_msg = Message {
                     msg_type: MessageType::LeaderInfo(self.epoch),
                     sender_id: self.id,
                     epoch: 0,
                 };
-                self.send(msg.sender_id, msg)
+                self.send(msg.sender_id, new_msg)
             }
 
             MessageType::AckEpoch(follower_z, _follower_epoch) => {
@@ -207,12 +225,12 @@ impl<S : BaseSender<Message>> Node<S> {
                 //  ensure that no new commits are made by leader in between
                 // hopefully TCP and p2 ordering will prevent UpToDate from arriving
                 //  before sync
-                let msg = Message {
+                let new_msg = Message {
                     msg_type: MessageType::UpToDate,
                     sender_id: self.id,
                     epoch: self.epoch,
                 };
-                self.send(msg.sender_id, msg);
+                self.send(msg.sender_id, new_msg);
             }
 
             MessageType::ClientProposal(data) => {
@@ -278,10 +296,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     }
                 }
             },
-            MessageType::Vote(_) => {
-                self.leader_elector.invite_straggler(self.committed_zxid, self.epoch, self.state, &self.tx[&msg.sender_id]);
-            },
-
+            MessageType::Vote(_v) => {},
             _ => {
                 println!("Unsupported msg type for leader");
             }
@@ -330,10 +345,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     None => {}
                 }
             },
-            MessageType::Vote(_) => {
-                self.leader_elector.invite_straggler(self.committed_zxid, self.epoch, self.state, &self.tx[&msg.sender_id]);
-            },
-
+            MessageType::Vote(_v) => {},
             _ => {
                 println!("Unsupported msg type for follower");
             }
@@ -354,11 +366,9 @@ impl<S : BaseSender<Message>> Node<S> {
                             panic!("Node {} got {} leader, but {} node does not exist", self.id, leader_id, leader_id)
                         }
                         if leader_id == self.id {
-                            println!("\n\n >> {} is leader!", self.id);
                             // I'm leader candidate!
                             let result = self.leader_p1(proposed_epoch);
                             if let Some(connected_followers) = result {
-                                println!("\n\n >> {} ldr_p1 ok!", self.id);
                                 // self.state changed here if p2 successful
                                 self.leader_p2(connected_followers, proposed_epoch);
                             }
@@ -373,11 +383,11 @@ impl<S : BaseSender<Message>> Node<S> {
                     // if self.state has not been changed,
                     //  something failed, state is still looking and we will
                     //  call look_for_leader again in next iteration
-                    println!("{} state now {:?} ", self.id, self.state);
-                    if (self.state == NodeState::Looking) {
-                         // just leave so we can debug T.T
-                        break;
-                    }
+                    println!("{} state now {:?} {:?}", self.id, self.state, self.leader);
+                    // if (self.state == NodeState::Looking) {
+                    //      // just leave so we can debug T.T
+                    //     break;
+                    // }
                 },
                 NodeState::Leading => {
                     let msg = self.receive();
@@ -520,7 +530,7 @@ impl<S : BaseSender<Message>> Node<S> {
     fn leader_p2(&mut self, connected_followers: HashMap<u64, u64>, proposed_epoch: u64) -> bool {
         // Sync follower logs with leader logs
         for (f_id, f_zxid) in connected_followers {
-            self.sync_with_follower(f_id, f_zxid, self.epoch);
+            self.sync_with_follower(f_id, f_zxid, proposed_epoch);
         }
 
         // Wait until quorum has acked the sync operation
@@ -530,7 +540,7 @@ impl<S : BaseSender<Message>> Node<S> {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
                 if let MessageType::Ack(zxid) = msg.msg_type {
-                    assert!(zxid == self.committed_zxid, "{} != {}", zxid, self.committed_zxid);
+                    assert!(zxid == proposed_epoch << 32, "{} != {} << 32", zxid, proposed_epoch);
                     if acks.insert(msg.sender_id) {
                         last_recv = Instant::now();
                     }
@@ -544,6 +554,7 @@ impl<S : BaseSender<Message>> Node<S> {
                 return false;
             }
         }
+        self.leader = Some(self.id);
         self.epoch = proposed_epoch;
         self.next_zxid = (self.epoch << 32) + 1;
         self.state = NodeState::Leading;
@@ -566,16 +577,17 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
-                if let MessageType::Snap(commit_log) = msg.msg_type {
+                if let MessageType::Snap((commit_log, proposed_epoch)) = msg.msg_type {
                     if msg.sender_id == leader_id {
                         if commit_log.len() > 0 {
                             self.committed_zxid = commit_log[commit_log.len() - 1].0;
                         } else {
                             self.committed_zxid = 0;
                         }
+                        self.epoch = proposed_epoch;
                         self.zab_log.commit_log = commit_log;
                         let ack_msg = Message {
-                            msg_type: MessageType::Ack(self.committed_zxid),
+                            msg_type: MessageType::Ack(self.epoch << 32),
                             sender_id: self.id,
                             epoch: self.epoch,
                         };
@@ -605,15 +617,16 @@ impl<S : BaseSender<Message>> Node<S> {
             }
         }
         self.state = NodeState::Following;
+        self.leader = Some(leader_id);
         return true;
     }
 
     fn sync_with_follower(&mut self, follower_id: u64, _follower_zxid: u64, proposed_epoch: u64) {
         // TODO: always SNAP for now
         let msg = Message {
-            msg_type: MessageType::Snap(self.zab_log.commit_log.clone()),
+            msg_type: MessageType::Snap((self.zab_log.commit_log.clone(), proposed_epoch)),
             sender_id: self.id,
-            epoch: proposed_epoch,
+            epoch: self.epoch
         };
         self.send(follower_id, msg);
     }
