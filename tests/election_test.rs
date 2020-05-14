@@ -29,6 +29,26 @@ fn three_zab_epoch_cmp_3() {
     n_election(vec![(0,0,3,0), (1,0,3,0), (2,0,2,0)], Some((3,1)));
 }
 
+#[test]
+fn three_zab_epoch_cmp_4() {
+    n_election(vec![(0,0,2,2), (1,0,3,50), (2,0,1,20)], Some((3,1)));
+}
+
+#[test]
+fn three_zab_epoch_cmp_5() {
+    n_election(vec![(0,0,4,10), (1,0,3,120), (2,0,1,4)], Some((4,0)));
+}
+
+#[test]
+fn three_zab_epoch_cmp_6() {
+    n_election(vec![(0,0,2,1), (1,0,3,2), (2,0,5,3)], Some((5,2)));
+}
+
+#[test]
+fn three_zab_epoch_cmp_7() {
+    n_election(vec![(0,0,3,76), (1,0,3,23), (2,0,2,1111)], Some((3,0)));
+}
+
 // cmp zxid
 #[test]
 fn three_zxid_cmp_0() {
@@ -49,7 +69,6 @@ fn three_zxid_cmp_2() {
 fn three_zxid_cmp_3() {
     n_election(vec![(0,0,0,1), (1,0,0,2), (2,0,0,1)], Some((0,1)));
 }
-
 
 // cmp on id
 #[test]
