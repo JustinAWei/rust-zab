@@ -22,7 +22,7 @@ pub fn create_zab_ensemble(n_nodes : u64) -> (HashMap<u64, Node<UnreliableSender
     for i in 0..n_nodes {
         let (s, r) = channel();
         let us = UnreliableSender::new(s.clone());
-        let node = Node::new(i, n_nodes, false, s.clone(), r);
+        let node = Node::new(i, n_nodes, s.clone(), r);
         nodes.insert(i, node);
         senders.insert(i, us);
     }
@@ -47,7 +47,7 @@ pub fn create_zab_ensemble(n_nodes : u64) -> (HashMap<u64, Node<UnreliableSender
 struct InflightTxn {
     data: String,
     ack_ids: HashSet<u64>,
-    scheduler_handle: timer::Guard
+    _scheduler_handle: timer::Guard
 }
 
 pub struct ZabLog {
@@ -110,7 +110,7 @@ pub struct Node<T : BaseSender<Message>> {
 }
 
 impl<S : BaseSender<Message>> Node<S> {
-    pub fn new(i: u64, cluster_size: u64, is_leader: bool, tx : Sender<Message>, rx : Receiver<Message>) -> Node<S> {
+    pub fn new(i: u64, cluster_size: u64, tx : Sender<Message>, rx : Receiver<Message>) -> Node<S> {
         assert!(cluster_size % 2 == 1);
         let quorum_size = (cluster_size + 1) / 2;
         Node {
@@ -179,7 +179,7 @@ impl<S : BaseSender<Message>> Node<S> {
         };
         match msg.msg_type {
             // TODO handle p1, p2 msgs
-            MessageType::FollowerInfo(e, _) => {
+            MessageType::FollowerInfo(_fepoch, _) => {
                 // respond to follower's phase 1 message
                 let msg = Message {
                     msg_type: MessageType::LeaderInfo(self.epoch),
@@ -213,7 +213,7 @@ impl<S : BaseSender<Message>> Node<S> {
                 let mut txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(),
-                    scheduler_handle: self.spawn_timeout(zxid)
+                    _scheduler_handle: self.spawn_timeout(zxid)
                 };
                 txn.ack_ids.insert(self.id);
 
@@ -268,7 +268,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     }
                 }
             },
-            MessageType::Vote(vote) => {
+            MessageType::Vote(_) => {
                 self.leader_elector.invite_straggler(self.committed_zxid, self.epoch, self.state, &self.tx[&msg.sender_id]);
             },
 
@@ -292,7 +292,7 @@ impl<S : BaseSender<Message>> Node<S> {
                 let txn = InflightTxn {
                     data: data.clone(),
                     ack_ids: HashSet::new(), // TODO null?
-                    scheduler_handle: self.spawn_timeout(zxid)
+                    _scheduler_handle: self.spawn_timeout(zxid)
                 };
                 self.inflight_txns.insert(zxid, txn);
 
@@ -320,7 +320,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     None => {}
                 }
             },
-            MessageType::Vote(vote) => {
+            MessageType::Vote(_) => {
                 self.leader_elector.invite_straggler(self.committed_zxid, self.epoch, self.state, &self.tx[&msg.sender_id]);
             },
 
@@ -392,7 +392,7 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_option = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
             if let Some(msg) = msg_option {
-                if let MessageType::FollowerInfo(e, _) = msg.msg_type {
+                if let MessageType::FollowerInfo(_fepoch, _) = msg.msg_type {
                     if m.insert(msg.sender_id, true) == None {
                         last_recv = Instant::now();
                     }
@@ -582,7 +582,7 @@ impl<S : BaseSender<Message>> Node<S> {
         return true;
     }
 
-    fn sync_with_follower(&mut self, follower_id: u64, follower_zxid: u64, proposed_epoch: u64) {
+    fn sync_with_follower(&mut self, follower_id: u64, _follower_zxid: u64, proposed_epoch: u64) {
         // TODO: always SNAP for now
         let msg = Message {
             msg_type: MessageType::Snap(self.zab_log.commit_log.clone()),

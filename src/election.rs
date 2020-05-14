@@ -1,7 +1,7 @@
 use crate::message::{MessageType, Message, NodeState, Vote};
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::Receiver;
 use std::collections::HashMap;
-use crate::comm::{BaseSender, UnreliableSender};
+use crate::comm::BaseSender;
 
 pub struct LeaderElector {
     // used for tie breaking and identifying leader node3
@@ -209,13 +209,6 @@ impl LeaderElector {
             s.send(msg.clone());
         }
     }
-
-    fn broadcast_new_state(
-    )// follower or leader now)
-    {
-
-    }
-
 }
 
 /*
