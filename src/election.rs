@@ -1,6 +1,7 @@
 use crate::message::{MessageType, Message, NodeState, Vote};
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
+use crate::comm::{BaseSender, UnreliableSender};
 
 pub struct LeaderElector {
     // used for tie breaking and identifying leader node3
@@ -51,11 +52,12 @@ impl LeaderElector {
         }
     }
 
+    // tx should not include the node itself
     // caller should wait for this to return
-    pub fn look_for_leader(
+    pub fn look_for_leader<T : BaseSender<Message>>(
         & mut self,
         rx : & mut Receiver<Message>,
-        tx : & mut HashMap<u64, Sender<Message>>,
+        tx : & mut HashMap<u64, T>,
         init_proposed_zab_epoch : u64,
         last_zxid : u64,
         quorum_size : u64
@@ -185,7 +187,7 @@ impl LeaderElector {
         }
     }
 
-    pub fn invite_straggler(&self, last_zxid: u64, proposed_zab_epoch: u64, state: NodeState, s: &Sender<Message>) {
+    pub fn invite_straggler<T : BaseSender<Message>>(&self, last_zxid: u64, proposed_zab_epoch: u64, state: NodeState, s: &T) {
         // send my_vote to all peers
         let my_vote : Vote = Vote::new(self.id,
             last_zxid,
@@ -202,7 +204,7 @@ impl LeaderElector {
         s.send(vote_msg);
     }
 
-    fn broadcast(&self, tx : & mut HashMap<u64, Sender<Message>>, msg : Message) {
+    fn broadcast<S : BaseSender<Message>>(&self, tx : & mut HashMap<u64, S>, msg : Message) {
         for (_, s) in tx {
             s.send(msg.clone());
         }
