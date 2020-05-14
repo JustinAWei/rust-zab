@@ -123,12 +123,12 @@ fn five_election() {
 }
 
 #[test]
-fn fifty_election() {
+fn fifty_one_election() {
     let mut params : Vec<(u64, u64, u64, u64)> = Vec::new();
-    for i in 0..50 {
+    for i in 0..51 {
         params.push((i,0,0,0));
     }
-    n_election(params, Some((0,49)));
+    n_election(params, Some((0,50)));
 }
 
 fn n_election(params: Vec<(u64, u64, u64, u64)>, expected_result: Option<(u64, u64)>) {
