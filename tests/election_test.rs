@@ -113,14 +113,35 @@ fn three_zxid_cmp_3a() {
 
 // cmp on id
 #[test]
-fn three_election() {
+fn three_election_id_cmp_1() {
     n_election(vec![(0,0,0,0), (1,0,0,0), (2,0,0,0)], Some((0,2)));
 }
 
 #[test]
-fn five_election() {
+fn five_election_id_cmp_1() {
     n_election(vec![(0,0,0,0), (1,0,0,0), (2,0,0,0), (3,0,0,0), (4,0,0,0)], Some((0,4)));
 }
+
+#[test]
+fn three_election_id_cmp_1a() {
+    n_election(vec![(0,1,1,1), (1,1,1,1), (2,1,1,1)], Some((1,2)));
+}
+
+#[test]
+fn five_election_id_cmp_1a() {
+    n_election(vec![(0,1,1,1), (1,1,1,1), (2,1,1,1), (3,1,1,1), (4,1,1,1)], Some((1,4)));
+}
+
+// cmp on election epoch
+#[test]
+fn three_election_epoch_cmp_1() {
+    n_election(vec![(0,1,0,0), (1,1,0,0), (2,1,0,0)], Some((0,2)));
+}
+
+// #[test]
+// fn three_election_epoch_cmp_2() {
+//     n_election(vec![(0,0,0,0), (1,0,0,0), (2,1,0,0)], Some((0,2)));
+// }
 
 #[test]
 fn fifty_one_election() {
@@ -153,7 +174,11 @@ fn n_election(params: Vec<(u64, u64, u64, u64)>, expected_result: Option<(u64, u
         let mut receivers_cpy = receivers.remove(&id).unwrap();
         let mut senders_cpy = senders.clone();
         let handle = thread::spawn(move || {
-            return electors_cpy.look_for_leader(&mut receivers_cpy, &mut senders_cpy, init_proposed_zab_epoch, last_zxid, quorum_size);
+            let mut r = None;
+            while r.is_none() {
+                r = electors_cpy.look_for_leader(&mut receivers_cpy, &mut senders_cpy, init_proposed_zab_epoch, last_zxid, quorum_size);
+            }
+            return r;
         });
         handles.insert(id, handle);
     }
