@@ -1,8 +1,8 @@
 use zookeeper;
-use std::sync::mpsc::{Sender, Receiver, channel, RecvTimeoutError};
-use std::collections::{HashSet, HashMap};
+use std::sync::mpsc::{Sender, Receiver, channel};
+use std::collections::{HashMap};
 use zookeeper::election::LeaderElector;
-use zookeeper::message::{MessageType, Message, NodeState};
+use zookeeper::message::{Message};
 use std::thread;
 
 // vec id, epoch, zepoch, zxid
@@ -156,6 +156,22 @@ fn three_election_epoch_cmp_4() {
 #[test]
 fn three_election_epoch_cmp_5() {
     n_election(vec![(0,0,0,0), (1,0,0,0), (2,100,0,0)], Some((0,2)));
+}
+
+// cmp on election epoch
+#[test]
+fn three_election_epoch_cmp_1a() {
+    n_election(vec![(0,1,0,0), (1,1,0,0), (2,10,0,0)], Some((0,2)));
+}
+
+#[test]
+fn three_election_epoch_cmp_2a() {
+    n_election(vec![(0,5,0,0), (1,10,0,0), (2,20,0,0)], Some((0,2)));
+}
+
+#[test]
+fn three_election_epoch_cmp_3a() {
+    n_election(vec![(0,1,0,0), (1,2,0,0), (2,3,0,0)], Some((0,2)));
 }
 
 #[test]
