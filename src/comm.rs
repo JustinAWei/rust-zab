@@ -23,7 +23,11 @@ pub struct UnreliableSender<T : Debug + Send + Clone> {
 impl<T : Debug + Send + Clone> BaseSender<T> for UnreliableSender<T> {
     fn send(& self, value : T) {
         if self.ok.load(Ordering::SeqCst) {
-            self.s.send(value).unwrap();
+            let result = self.s.send(value);
+            match result {
+                Ok(_) => {},
+                Err(e) => println!("Can't send from sender!{}", e),
+            }
         }
     }
 }
