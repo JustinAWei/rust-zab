@@ -16,6 +16,9 @@ use std::io;
 
 const results_filename   : &str = "logs/results.log";
 static logpath_counter : AtomicU64 = AtomicU64::new(0);
+const SLP_PROPOSAL_MS : u64 = 1200;
+const SLP_PROPOSAL_TIMEOUT_MS : u64 = 1600;
+const SLP_LDR_ELECT5 : u64 = 5000;
 
 // The output is wrapped in a Result to allow matching on errors
 // Returns an Iterator to the Reader of the lines of the file.
@@ -155,7 +158,6 @@ fn check_history_prefix(node_id : u64, log_base : &String, truth: &Vec<(u64, Str
     return true;
 }
 
-
 #[test]
 fn sanity_check_nodes() {
     let logpath = get_unique_logpath();
@@ -165,8 +167,8 @@ fn sanity_check_nodes() {
     assert!(handles.len() == n);
     assert!(running.len() == n);
 
-    
-    let t = time::Duration::from_millis(400);
+    // enough time for nodes to begin running
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
 
     for i in 0..n {
@@ -189,7 +191,7 @@ fn test_one_ldr_others_follow() {
     let n = 5 as usize;
     let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
     
-    let t = time::Duration::from_millis(3000);
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
     let curr_epoch = ce.load(Ordering::SeqCst);
     let curr_ldr = cl.load(Ordering::SeqCst);
@@ -215,7 +217,7 @@ fn test_stable_one_proposal() {
     let n = 5 as usize;
     let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
     
-    let t = time::Duration::from_millis(2000);
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
 
     let proposal = Message {
@@ -227,7 +229,7 @@ fn test_stable_one_proposal() {
         senders[&i].send(proposal.clone()).expect("nahh");
     }
 
-    let t = time::Duration::from_millis(1000);
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
     
     for i in 0..n {
@@ -240,9 +242,6 @@ fn test_stable_one_proposal() {
     cleanup_logpath(logpath);
 }
 
-const SLP_PROPOSAL_MS : u64 = 800;
-const SLP_PROPOSAL_TIMEOUT_MS : u64 = 1200;
-const SLP_LDR_ELECT5 : u64 = 3000;
 #[test]
 fn network_partition_followers() {
     // Setup
@@ -324,7 +323,7 @@ fn network_partition_followers() {
             same_count += 1;
         }
     }
-    assert!(same_count == n - p_size);
+    assert!(same_count == n - p_size, "{} != {} - {}", same_count, n, p_size);
 
     // Restore partition and send proposal
     for i in 0..n {

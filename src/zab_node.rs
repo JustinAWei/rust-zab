@@ -262,6 +262,50 @@ impl<S : BaseSender<Message>> Node<S> {
         }
     }
 
+    // If transaction is still inflight, check for quorum and perform 2pc
+    //  otherwise, no-op
+    // it is safe to call this multiple times
+    // returns true if this call successfully commited 2pc
+    fn leader_try_commit_txn(& mut self, zxid : u64) -> bool {
+        let mut quorum_ack : bool = false;
+        match self.inflight_txns.get_mut(&zxid) {
+            Some(t) => {
+                if t.ack_ids.len() as u64 >= self.quorum_size {
+                    quorum_ack = true
+                }
+            },
+            None => {},
+        };
+
+        if quorum_ack {
+            if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
+                println!("(zxid {}, self.committed {})", zxid, self.committed_zxid);
+                panic!("leader missed a zxid");
+                // return;
+            }
+            if let Some(t) = self.inflight_txns.remove(&zxid) {
+                // handle quorum
+                // we can first send to followers before writing in our own logs
+                let send_msg = Message {
+                    sender_id: self.id,
+                    epoch: self.epoch,
+                    msg_type: MessageType::Commit(zxid),
+                };
+                for id in 0..self.cluster_size {
+                    if id != self.id {
+                        self.send(id, send_msg.clone());
+                    }
+                }
+                // TODO: where do we record??
+                self.zab_log.record_commit(zxid, t.data.clone());
+                self.zab_log.record_commit_to_client(zxid, t.data.clone());
+                self.committed_zxid = zxid;
+                return true;
+            }
+        }
+        return false;
+    }
+
     fn process_leader(&mut self, msg: Message) {
         match msg.msg_type {
             // TODO handle p1, p2 msgs
@@ -343,44 +387,25 @@ impl<S : BaseSender<Message>> Node<S> {
                 if msg.epoch != self.epoch {
                     panic!("epoch mismatch: sender_e {} = {} my_e {} = {}", msg.sender_id, msg.epoch, self.id, self.epoch);
                 };
-                let mut quorum_ack : bool = false;
-                match self.inflight_txns.get_mut(&zxid) {
-                    Some(t) => {
-                        t.ack_ids.insert(msg.sender_id);
-                        if t.ack_ids.len() as u64 >= self.quorum_size {
-                            quorum_ack = true
-                        }
-                    },
-                    None => {},
+                let mut check_quorum : bool = false;
+                if let Some(t) =  self.inflight_txns.get_mut(&zxid) {
+                    t.ack_ids.insert(msg.sender_id);
+                    check_quorum = true;
                 };
-
-                if quorum_ack {
-                    if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
-                        println!("(zxid {}, self.committed {})", zxid, self.committed_zxid);
-                        panic!("leader missed a zxid");
-                        // return;
-                    }
-                    match self.inflight_txns.remove(&zxid) {
-                        Some(t) => {
-                            // handle quorum
-                            // we can first send to followers before writing in our own logs
-                            let send_msg = Message {
-                                sender_id: self.id,
-                                epoch: self.epoch,
-                                msg_type: MessageType::Commit(zxid),
-                            };
-                            for id in 0..self.cluster_size {
-                                if id != self.id {
-                                    self.send(id, send_msg.clone());
-                                }
-                            }
-                            // TODO: where do we record??
-                            self.zab_log.record_commit(zxid, t.data.clone());
-                            self.zab_log.record_commit_to_client(zxid, t.data.clone());
-                            self.committed_zxid = zxid;
-                        },
-                        None => {}
-                    }
+                if check_quorum {
+                    self.leader_try_commit_txn(zxid);
+                }
+            },
+            MessageType::InternalTimeout(zxid) => {
+                // check if txid was committed
+                if zxid <= self.committed_zxid {
+                    // already commited, no-op
+                } else if self.leader_try_commit_txn(zxid) {
+                    // attempt to commit found a quorum, no-op
+                } else {
+                    // txn timed out, no quorum
+                    self.state = NodeState::Looking;
+                    return;
                 }
             },
             MessageType::Vote(_v) => {},
@@ -449,6 +474,13 @@ impl<S : BaseSender<Message>> Node<S> {
             MessageType::Vote(_v) => {},
             MessageType::ReturnToMainloop => {
                 return;
+            },
+            MessageType::InternalTimeout(zxid) => {
+                if zxid > self.committed_zxid {
+                    // txn timed out, no commit received
+                    self.state = NodeState::Looking;
+                    return;
+                } // else, already commited, no-op
             },
             _ => {
                 println!("Unsupported msg type for follower");
