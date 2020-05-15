@@ -194,6 +194,7 @@ impl<S : BaseSender<Message>> Node<S> {
                 if self.state == NodeState::Looking {
                     self.leader_elector.send_last_vote(self.epoch, self.state, &self.tx[&msg.sender_id]);
                 } else {
+                    println!("{} INVITING {}", self.id, msg.sender_id);
                     self.leader_elector.invite_straggler(
                         self.leader.unwrap(),
                         self.committed_zxid,
@@ -235,7 +236,7 @@ impl<S : BaseSender<Message>> Node<S> {
     fn process_leader(&mut self, msg: Message) {
         if msg.epoch != self.epoch {
             // note : this might happen for followerinfo, vote, etc
-            println!("~~~bad things have happened, ooh spooky~~~ sender_e = {} my_e = {}", msg.epoch, self.epoch);
+            println!("epoch mismatch: sender_e {} = {} my_e {} = {} [{:?}]", msg.sender_id, msg.epoch, self.id, self.epoch, msg.msg_type);
         };
         match msg.msg_type {
             // TODO handle p1, p2 msgs
@@ -250,6 +251,7 @@ impl<S : BaseSender<Message>> Node<S> {
             }
 
             MessageType::AckEpoch(follower_z, _follower_epoch) => {
+                println!("fuck this shit");
                 // respond to follower's phase 1 message
                 //  this will start follower's phase 2
                 self.sync_with_follower(msg.sender_id, follower_z, self.epoch);
@@ -366,6 +368,7 @@ impl<S : BaseSender<Message>> Node<S> {
             MessageType::Proposal(zxid, data) => {
                 if zxid != self.next_zxid && self.next_zxid & 0xffffffff != 1 {
                     println!("Proposal - follower missed a zxid (msg zxid {}, self.next_zxid {})", zxid, self.next_zxid);
+                    self.state = NodeState::Looking;
                     return;
                 }
                 self.next_zxid += 1;
@@ -390,6 +393,7 @@ impl<S : BaseSender<Message>> Node<S> {
             MessageType::Commit(zxid) => {
                 if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
                     println!("Commit - follower missed a zxid (msg zxid {}, self.committed_zxid + 1 {})", zxid, self.committed_zxid + 1);
+                    self.state = NodeState::Looking;
                     return;
                 }
 
@@ -538,6 +542,7 @@ impl<S : BaseSender<Message>> Node<S> {
 
     fn follower_p1(&mut self, leader_id: u64) -> bool {
         // f Followers connect the the leader and send FOLLOWERINFO.
+        println!("follower {} entering p1 with leaderid {}", self.id, leader_id);
         let msg = Message {
             msg_type: MessageType::FollowerInfo(self.epoch, "".to_string()),
             sender_id: self.id,

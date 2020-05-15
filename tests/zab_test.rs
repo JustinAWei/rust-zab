@@ -1,3 +1,5 @@
+use rand::thread_rng;
+use rand::seq::SliceRandom;
 use std::{thread, time};
 use zookeeper::zab_node::{Node, create_zab_ensemble};
 use zookeeper::message::{MessageType, Message, NodeState};
@@ -103,10 +105,12 @@ fn check_history_same(node_id : u64, truth: &Vec<(u64, String)>) -> bool {
     }
 
     if node_history.len() != truth.len() {
+        println!("wrong len! hist: {:?}, truth: {:?}", node_history, truth);
         return false;
     }
     for i in 0..node_history.len() {
         if node_history[i] != truth[i] {
+            println!("wrong val at idx {}!", i);
             return false;
         }
     }
@@ -161,4 +165,114 @@ fn sanity_check_nodes() {
     for i in 0..n {
         assert!(check_history_same(i as u64, &truth))
     }
+}
+
+#[test]
+fn network_partition_followers() {
+    // Setup
+    let n = 5 as usize;
+    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64);
+    assert!(senders.len() == n);
+    assert!(handles.len() == n);
+    assert!(running.len() == n);
+
+    let t = time::Duration::from_millis(5000);
+    thread::sleep(t);
+
+    // Initial proposal
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("suhh")),
+    };
+    senders[&0].send(proposal.clone()).expect("nahh");
+    let t = time::Duration::from_millis(500);
+    thread::sleep(t);
+
+    // Check invariants
+    let truth = get_truth();
+    for i in 0..n {
+        assert!(check_history_same(i as u64, &truth), "failed at i = {}", i);
+    }
+
+    // Create partition with only followers
+    let p_size = 2;
+    let non_ldr: Vec<usize> = (0..n).filter(|id| *id as u64 != cl.load(Ordering::SeqCst)).collect();
+    let p1: Vec<_> = non_ldr.choose_multiple(&mut rand::thread_rng(), p_size).collect();
+    println!("partition {:?}", p1);
+    for i in 0..n {
+        if p1.contains(&&i) {
+            for j in 0..n {
+                if !p1.contains(&&j) {
+                    controller.make_sender_fail(i as u64, j as u64);
+                    controller.make_sender_fail(j as u64, i as u64);
+                }
+            }
+        }
+    }
+
+    // Propose to partition
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("suhh1")),
+    };
+    let p_follower = *p1[0] as u64;
+    senders[&p_follower].send(proposal.clone()).expect("nahh");
+    let t = time::Duration::from_millis(500);
+    thread::sleep(t);
+
+    // Check invariants (no new commits)
+    let truth = get_truth();
+    for i in 0..n {
+        assert!(check_history_same(i as u64, &truth), "failed at i = {}", i);
+    }
+
+    // Propose to quorum
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("suhh1")),
+    };
+    senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("nahh");
+    let t = time::Duration::from_millis(500);
+    thread::sleep(t);
+
+    // Check invariants (quorum should have committed, partition should not have)
+    let mut same_count = 0;
+    let truth = get_truth();
+    for i in 0..n {
+        assert!(check_history_prefix(i as u64, &truth), "failed at i = {}", i);
+        if check_history_same(i as u64, &truth) {
+            same_count += 1;
+        }
+    }
+    assert!(same_count == n - p_size);
+
+    // Restore partition and send proposal
+    for i in 0..n {
+        for j in 0..n {
+            controller.make_sender_ok(i as u64, j as u64);
+            controller.make_sender_ok(j as u64, i as u64);
+        }
+    }
+    let t = time::Duration::from_millis(500);
+    thread::sleep(t);
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("suhh2")),
+    };
+    senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("nahh");
+    let t = time::Duration::from_millis(10000);
+    thread::sleep(t);
+
+    // Check invariants (all should commit)
+    let truth = get_truth();
+    for i in 0..n {
+        assert!(check_history_same(i as u64, &truth), "failed at i = {}", i);
+    }
+
+    //assert!(1 == 2);
+
 }
