@@ -590,7 +590,15 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_timeout = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
             if let Some(msg) = msg_timeout {
-                if let MessageType::AckEpoch(follower_z, follower_epoch) = msg.msg_type {
+                if let MessageType::FollowerInfo(_fepoch, _) = msg.msg_type {
+                    // sends LEADERINFO(e) to all followers, where e is greater than all f.acceptedEpoch in the quorum
+                    let new_msg = Message {
+                        msg_type: MessageType::LeaderInfo(le_epoch),
+                        sender_id: self.id,
+                        epoch: 0,
+                    };
+                    self.send(msg.sender_id, new_msg);
+                } else if let MessageType::AckEpoch(follower_z, follower_epoch) = msg.msg_type {
                     // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
                     // f.currentEpoch <= l.currentEpoch
                     if !(follower_epoch <= self.epoch) {
@@ -680,7 +688,17 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
-                if let MessageType::Ack(zxid) = msg.msg_type {
+                if let MessageType::FollowerInfo(_fepoch, _) = msg.msg_type {
+                    // sends LEADERINFO(e) to all followers, where e is greater than all f.acceptedEpoch in the quorum
+                    let new_msg = Message {
+                        msg_type: MessageType::LeaderInfo(proposed_epoch),
+                        sender_id: self.id,
+                        epoch: 0,
+                    };
+                    self.send(msg.sender_id, new_msg);
+                } else if let MessageType::AckEpoch(follower_z, follower_epoch) = msg.msg_type {
+                    self.sync_with_follower(msg.sender_id, follower_z, proposed_epoch);
+                } else if let MessageType::Ack(zxid) = msg.msg_type {
                     assert!(zxid == proposed_epoch << 32, "{} != {} << 32", zxid, proposed_epoch);
                     if acks.insert(msg.sender_id) {
                         last_recv = Instant::now();
