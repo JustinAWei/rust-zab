@@ -8,7 +8,7 @@ use message::{MessageType, Message, NodeState};
 
 fn main() {
     println!("hello world!");
-    let nnodes = 5;
+    let nnodes = 11;
     let (nodes, _senders, _controller) = create_zab_ensemble(nnodes);
     let mut handles = Vec::new();
 
@@ -29,7 +29,7 @@ fn main() {
     let t = time::Duration::from_millis(5000);
     thread::sleep(t);
 
-    for i in 0..1 {
+    for i in 0..11 {
         println!("client proposal!");
         _senders[&i].send(proposal.clone()).expect("nahh");
     }

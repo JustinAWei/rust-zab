@@ -284,8 +284,8 @@ impl<S : BaseSender<Message>> Node<S> {
                 };
 
                 if quorum_ack {
-                    if zxid != self.committed_zxid + 1 {
-                        println!("(zxid {}, self.committed {}", zxid, self.committed_zxid);
+                    if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
+                        println!("(zxid {}, self.committed {})", zxid, self.committed_zxid);
                         panic!("leader missed a zxid");
                         // return;
                     }
@@ -359,7 +359,7 @@ impl<S : BaseSender<Message>> Node<S> {
                 self.zab_log.record_proposal(zxid, data);
             },
             MessageType::Commit(zxid) => {
-                if zxid != self.committed_zxid + 1 {
+                if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
                     println!("follower missed a zxid");
                     return;
                 }
@@ -567,7 +567,7 @@ impl<S : BaseSender<Message>> Node<S> {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
                 if let MessageType::Ack(zxid) = msg.msg_type {
-                    assert!(zxid == self.committed_zxid + 1, "{} != {}", zxid, self.committed_zxid + 1);
+                    assert!(zxid == proposed_epoch << 32, "{} != {} << 32", zxid, proposed_epoch);
                     if acks.insert(msg.sender_id) {
                         last_recv = Instant::now();
                     }
@@ -583,8 +583,7 @@ impl<S : BaseSender<Message>> Node<S> {
         }
         self.leader = Some(self.id);
         self.epoch = proposed_epoch;
-        self.committed_zxid += 1;
-        self.next_zxid = self.committed_zxid + 1;
+        self.next_zxid = (self.epoch << 32) + 1;
         self.state = NodeState::Leading;
 
         // Send up to date to all acked followers
@@ -612,12 +611,11 @@ impl<S : BaseSender<Message>> Node<S> {
                         } else {
                             self.committed_zxid = 0;
                         }
-                        self.committed_zxid += 1;
-                        self.next_zxid = self.committed_zxid + 1;
                         self.epoch = proposed_epoch;
+                        self.next_zxid = (self.epoch << 32) + 1;
                         self.zab_log.commit_log = commit_log;
                         let ack_msg = Message {
-                            msg_type: MessageType::Ack(self.committed_zxid),
+                            msg_type: MessageType::Ack(self.epoch << 32),
                             sender_id: self.id,
                             epoch: self.epoch,
                         };
