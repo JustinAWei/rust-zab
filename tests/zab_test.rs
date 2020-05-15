@@ -64,19 +64,21 @@ fn kill(node_id : u64,
         running : & mut HashMap<u64, Arc<AtomicBool>>) -> Node<UnreliableSender<Message>>
 {
     running.get_mut(&node_id).unwrap().store(false, Ordering::SeqCst);
-    let no_op = Message {
+    let return_to_main = Message {
                     sender_id: 0,
                     epoch: 0,
-                    msg_type: MessageType::ClientQuery,
+                    msg_type: MessageType::ReturnToMainloop,
                 };
-    senders.get(&node_id).unwrap().send(no_op.clone()).unwrap();
+    senders.get(&node_id).unwrap().send(return_to_main.clone()).unwrap();
     let result = handles.remove(&node_id).unwrap().join().unwrap();
     return result;
 }
 
 fn get_unique_logpath() -> String {
     let my_id = logpath_counter.fetch_add(1, Ordering::SeqCst);
-    return format!("testslogs{}", my_id);
+    let logpath = format!("testslogs{}", my_id);
+    cleanup_logpath(logpath.clone());
+    return logpath;
 }
 
 fn cleanup_logpath(logpath : String) {
@@ -198,7 +200,6 @@ fn test_one_ldr_others_follow() {
         }
     }
     assert!(handles.is_empty());
-    let t = time::Duration::from_millis(3000);
     thread::sleep(t);
     cleanup_logpath(logpath);
 }
