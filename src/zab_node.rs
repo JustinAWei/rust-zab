@@ -346,8 +346,8 @@ impl<S : BaseSender<Message>> Node<S> {
 
             // TODO handle p1, p2 msgs
             MessageType::Proposal(zxid, data) => {
-                if zxid != self.next_zxid {
-                    println!("follower missed a zxid (msg zxid {}, self.next_zxid {}", zxid, self.next_zxid);
+                if zxid != self.next_zxid && self.next_zxid & 0xffffffff != 1 {
+                    println!("Proposal - follower missed a zxid (msg zxid {}, self.next_zxid {})", zxid, self.next_zxid);
                     return;
                 }
                 self.next_zxid += 1;
@@ -371,7 +371,7 @@ impl<S : BaseSender<Message>> Node<S> {
             },
             MessageType::Commit(zxid) => {
                 if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
-                    println!("follower missed a zxid");
+                    println!("Commit - follower missed a zxid (msg zxid {}, self.committed_zxid + 1 {})", zxid, self.committed_zxid + 1);
                     return;
                 }
 
