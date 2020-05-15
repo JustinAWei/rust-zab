@@ -16,7 +16,7 @@ use std::io;
 
 const results_filename   : &str = "logs/results.log";
 static logpath_counter : AtomicU64 = AtomicU64::new(0);
-const SLP_PROPOSAL_MS : u64 = 2000;
+const SLP_PROPOSAL_MS : u64 = 3000;
 const SLP_PROPOSAL_TIMEOUT_MS : u64 = 2500;
 const SLP_LDR_ELECT5 : u64 = 2500;
 const SLP_STRAGGLER_CATCHUP : u64 = 2500;
@@ -271,6 +271,11 @@ fn test_stable_one_proposal() {
 }
 
 #[test]
+fn test_kill_1_follower_nohist_generic() {
+    test_kill_some_follower_nohist(5, 1);
+}
+
+#[test]
 fn test_kill_2_follower_nohist() {
     test_kill_some_follower_nohist(5, 2);
 }
@@ -512,6 +517,131 @@ fn test_kill_1_follower_prevhist() {
     }
 
     restart_node(killed_node.unwrap(), &mut handles, &senders, & running, &cl, &ce);
+
+    let t = time::Duration::from_millis(SLP_STRAGGLER_CATCHUP);
+    thread::sleep(t);
+
+    let truth = get_truth(&logpath);
+    assert_eq!(truth.len(), 2);
+    for i in 0..n {
+        check_history_same(i as u64, &logpath, &truth);
+    }
+    // make proposal, this should be committed to all nodes, including the 
+    //  one that was killed and reconnected
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("proposal02")),
+    };
+    senders[&curr_ldr].send(proposal.clone()).expect("nahh");
+
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+
+    for i in 0..n {
+        kill(i as u64, & senders, & mut handles, & mut running);
+    }
+
+    let truth = get_truth(&logpath);
+    assert_eq!(truth.len(), 3);
+    for i in 0..n {
+        check_history_same(i as u64, &logpath, &truth);
+    }
+    cleanup_logpath(logpath);
+}
+
+#[test]
+fn test_kill_1_follower_prevhist_generic() {
+    test_kill_some_follower_prevhist(5, 1);
+}
+
+#[test]
+fn test_kill_2_follower_prevhist() {
+    test_kill_some_follower_prevhist(5, 2);
+}
+
+#[test]
+fn test_kill_3_follower_prevhist() {
+    test_kill_some_follower_prevhist(7, 3);
+}
+
+#[test]
+fn test_kill_4_follower_prevhist() {
+    test_kill_some_follower_prevhist(9, 4);
+}
+
+#[test]
+fn test_kill_5_follower_prevhist() {
+    test_kill_some_follower_prevhist(11, 5);
+}
+
+fn test_kill_some_follower_prevhist(n: u64, m : u64) {
+    let logpath = get_unique_logpath();
+    let (senders, _, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
+    thread::sleep(t);
+
+    let curr_ldr = cl.load(Ordering::SeqCst);
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("proposal00")),
+    };
+    for i in 0..1 {
+        senders[&curr_ldr].send(proposal.clone()).expect("nahh");
+    }
+
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+    
+    let truth = get_truth(&logpath);
+    assert_eq!(truth.len(), 1);
+    for i in 0..n {
+        check_history_same(i as u64, &logpath, &truth);
+    }
+
+    let mut killed: HashMap<u64, Option<Node<UnreliableSender<Message>>>> = HashMap::new();
+
+    // kill node
+    let mut killstreak = 0;
+    for i in 0..n {
+        if i != curr_ldr {
+            let node = kill(i as u64, & senders, & mut handles, & mut running);
+            killed.insert(node.id, Some(node));
+            killstreak += 1;
+            if killstreak == m {break;}
+        }
+    }
+
+    // make proposal, this should be committed to all other nodes
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("proposal01")),
+    };
+    senders[&curr_ldr].send(proposal.clone()).expect("nahh");
+
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+    
+    let truth = get_truth(&logpath);
+    assert_eq!(truth.len(), 2);
+    for i in 0..n {
+        if killed.contains_key(&i) {
+            assert!(check_history_prefix(i as u64, &logpath, &truth));
+            // history shouldn't be same
+            assert!(!check_history_same(i as u64, &logpath, &truth));
+        } else {
+            assert!(check_history_same(i as u64, &logpath, &truth));
+        }
+    }
+
+    for i in 0..n {
+        if killed.contains_key(&i) {
+            restart_node(killed.remove(&i).unwrap().unwrap(), &mut handles, &senders, & running, &cl, &ce);
+        }
+    }
 
     let t = time::Duration::from_millis(SLP_STRAGGLER_CATCHUP);
     thread::sleep(t);
