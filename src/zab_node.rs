@@ -566,7 +566,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     if m.insert(msg.sender_id, true) == None {
                         last_recv = Instant::now();
                     }
-                    if m.len() >= self.quorum_size as usize {
+                    if m.len() >= (self.quorum_size - 1) as usize {
                         break;
                     }
                 } else if msg.msg_type == MessageType::ReturnToMainloop {
@@ -618,7 +618,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     if m.insert(msg.sender_id, follower_z) == None {
                         last_recv = Instant::now();
                     }
-                    if m.len() >= self.quorum_size as usize {
+                    if m.len() >= (self.quorum_size - 1) as usize {
                         return Some(m);
                     }
                 } else if msg.msg_type == MessageType::ReturnToMainloop {
@@ -708,7 +708,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     if acks.insert(msg.sender_id) {
                         last_recv = Instant::now();
                     }
-                    if acks.len() >= self.quorum_size as usize {
+                    if acks.len() >= (self.quorum_size - 1) as usize {
                         break;
                     }
                 } else if msg.msg_type == MessageType::ReturnToMainloop {

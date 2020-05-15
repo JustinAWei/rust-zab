@@ -986,9 +986,9 @@ fn network_partition_followers() {
     let proposal = Message {
         sender_id: 0,
         epoch: 1,
-        msg_type: MessageType::ClientProposal(String::from("suhh")),
+        msg_type: MessageType::ClientProposal(String::from("init prop")),
     };
-    senders[&0].send(proposal.clone()).expect("nahh");
+    senders[&0].send(proposal.clone()).expect("failed");
     let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
 
@@ -1018,10 +1018,10 @@ fn network_partition_followers() {
     let proposal = Message {
         sender_id: 0,
         epoch: 1,
-        msg_type: MessageType::ClientProposal(String::from("suhh1")),
+        msg_type: MessageType::ClientProposal(String::from("partition prop (should fail)")),
     };
     let p_follower = *p1[0] as u64;
-    senders[&p_follower].send(proposal.clone()).expect("nahh");
+    senders[&p_follower].send(proposal.clone()).expect("failed");
     let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
 
@@ -1035,9 +1035,9 @@ fn network_partition_followers() {
     let proposal = Message {
         sender_id: 0,
         epoch: 1,
-        msg_type: MessageType::ClientProposal(String::from("suhh1")),
+        msg_type: MessageType::ClientProposal(String::from("quorum prop (should commit)")),
     };
-    senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("nahh");
+    senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("failed");
     let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
 
@@ -1064,16 +1064,146 @@ fn network_partition_followers() {
     let proposal = Message {
         sender_id: 0,
         epoch: 1,
-        msg_type: MessageType::ClientProposal(String::from("suhh2")),
+        msg_type: MessageType::ClientProposal(String::from("restored prop (should commit)")),
     };
-    senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("nahh");
+    senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("failed");
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
-    
+
     for i in 0..n {
         kill(i as u64, & senders, & mut handles, & mut running);
     }
-    
+
+    // Check invariants (all should commit)
+    let truth = get_truth(&logpath);
+    for i in 0..n {
+        assert!(check_history_same(i as u64, &logpath, &truth), "failed at i = {}", i);
+    }
+    cleanup_logpath(logpath);
+}
+
+#[test]
+fn network_partition_leader() {
+    // Setup
+    let logpath = get_unique_logpath();
+    let n = 5 as usize;
+    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    assert!(senders.len() == n);
+    assert!(handles.len() == n);
+    assert!(running.len() == n);
+
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
+    thread::sleep(t);
+
+    // Initial proposal
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("init prop")),
+    };
+    senders[&0].send(proposal.clone()).expect("failed");
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+
+    // Check invariants
+    let truth = get_truth(&logpath);
+    for i in 0..n {
+        assert!(check_history_same(i as u64, &logpath, &truth), "failed at i = {}", i);
+    }
+
+    // Create partition with leader
+    // p1 is smaller partition with leader
+    // p2 is quorum partition
+    let p_size = 2;
+    let non_ldr: Vec<usize> = (0..n).filter(|id| *id as u64 != cl.load(Ordering::SeqCst)).collect();
+    let mut p1: Vec<_> = non_ldr.choose_multiple(&mut rand::thread_rng(), p_size - 1).collect();
+    let ldr = cl.load(Ordering::SeqCst) as usize;
+    p1.push(&ldr);
+    let p2: Vec<usize> = (0..n).filter(|id| !p1.contains(&id)).collect();
+    println!("partition {:?}", p1);
+    for i in 0..n {
+        if p1.contains(&&i) {
+            for j in 0..n {
+                if !p1.contains(&&j) {
+                    println!("breaking {} to {}", i, j);
+                    controller.make_sender_fail(i as u64, j as u64);
+                    controller.make_sender_fail(j as u64, i as u64);
+                }
+            }
+        }
+    }
+
+    // Propose to partition (leader)
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("partition prop to ex-leader (should fail)")),
+    };
+    senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("failed");
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+
+    // Check invariants (no new commits)
+    let truth = get_truth(&logpath);
+    for i in 0..n {
+        assert!(check_history_same(i as u64, &logpath, &truth), "failed at i = {}", i);
+    }
+
+    // Hack to initiate leader election in quorum
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::Proposal(BAD_ZXID_PROPOSAL, String::from("hack to leader elect")),
+    };
+    for f in &p2 {
+        senders[&(*f as u64)].send(proposal.clone()).expect("failed");
+    }
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
+    thread::sleep(t);
+
+    // Propose to quorum
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 2,
+        msg_type: MessageType::ClientProposal(String::from("quorum prop (should commit)")),
+    };
+    let quorum_follower = p2[0] as u64;
+    senders[&quorum_follower].send(proposal.clone()).expect("failed");
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+
+    // Check invariants (quorum should have committed, partition should not have)
+    let mut same_count = 0;
+    let truth = get_truth(&logpath);
+    for i in 0..n {
+        assert!(check_history_prefix(i as u64, &logpath, &truth), "failed at i = {}", i);
+        if check_history_same(i as u64, &logpath, &truth) {
+            same_count += 1;
+        }
+    }
+    assert!(same_count == n - p_size, "{} != {} - {}", same_count, n, p_size);
+
+    // Restore partition and send proposal
+    for i in 0..n {
+        for j in 0..n {
+            controller.make_sender_ok(i as u64, j as u64);
+            controller.make_sender_ok(j as u64, i as u64);
+        }
+    }
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 2,
+        msg_type: MessageType::ClientProposal(String::from("restored prop (should commit)")),
+    };
+    senders[&quorum_follower].send(proposal.clone()).expect("failed");
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
+    thread::sleep(t);
+
+    for i in 0..n {
+        kill(i as u64, & senders, & mut handles, & mut running);
+    }
 
     // Check invariants (all should commit)
     let truth = get_truth(&logpath);
