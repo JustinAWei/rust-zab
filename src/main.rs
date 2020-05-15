@@ -26,7 +26,7 @@ fn main() {
         msg_type: MessageType::ClientProposal(String::from("suhh")),
     };
 
-    let t = time::Duration::from_millis(5000);
+    let t = time::Duration::from_millis(1000);
     thread::sleep(t);
 
     for i in 0..11 {

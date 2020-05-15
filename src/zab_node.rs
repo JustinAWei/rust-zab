@@ -92,6 +92,17 @@ impl ZabLog {
         self.lf.flush().unwrap();
     }
 
+    pub fn dump(&mut self) {
+        for (zxid, data) in &self.commit_log {
+            let entry = ("c", zxid, data);
+
+            // append to file
+            serde_json::to_writer(&mut self.lf, &entry).unwrap();
+            writeln!(&mut self.lf).unwrap();
+        }
+        self.lf.flush().unwrap();
+    }
+
     pub fn latest_commit(&mut self) -> Option<(u64, String)> {
         if self.commit_log.len() == 0 {
             return None;
@@ -614,6 +625,9 @@ impl<S : BaseSender<Message>> Node<S> {
                         self.epoch = proposed_epoch;
                         self.next_zxid = (self.epoch << 32) + 1;
                         self.zab_log.commit_log = commit_log;
+
+                        self.zab_log.dump();
+
                         let ack_msg = Message {
                             msg_type: MessageType::Ack(self.epoch << 32),
                             sender_id: self.id,
