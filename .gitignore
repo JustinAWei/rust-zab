@@ -12,4 +12,4 @@ Cargo.lock
 **/*.rs.bk
 
 # logs directory
-logs/*.logs
+logs/*.log
