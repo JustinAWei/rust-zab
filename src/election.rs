@@ -2,6 +2,9 @@ use crate::message::{MessageType, Message, NodeState, Vote};
 use std::sync::mpsc::Receiver;
 use std::collections::HashMap;
 use crate::comm::BaseSender;
+use std::time::Duration;
+
+const VOTE_TIMEOUT_MS : u64 = 1000;
 
 pub struct LeaderElector {
     // used for tie breaking and identifying leader node3
@@ -85,11 +88,17 @@ impl LeaderElector {
 
         loop {
             // TODO : maybe change to recv_timeout
-            let msg_result = rx.recv();
+            let msg_result = rx.recv_timeout(Duration::from_millis(VOTE_TIMEOUT_MS));
             if ! msg_result.is_ok() {
                 // TODO
                 // implement exponential backoff
-                // log?
+                // broadcast self vote
+                let vote_msg = Message {
+                    sender_id: self.id,
+                    epoch: proposed_zab_epoch,
+                    msg_type: MessageType::Vote((my_vote.clone(), true)), // my vote, needs reply
+                };
+                self.broadcast(tx, vote_msg.clone());
                 continue;
             } 
             let msg = msg_result.unwrap();
