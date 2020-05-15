@@ -204,14 +204,14 @@ impl<S : BaseSender<Message>> Node<S> {
     pub fn register(&mut self, id: u64, tx: S) {
         match self.tx.insert(id, tx) {
             Some(v) => {
-                println!("Error in register! value already present {:?}", v);
+                // println!("Error in register! value already present {:?}", v);
             },
             None => {}
         };
     }
 
     fn send(&self, id: u64, msg: Message) {
-        //println!("node {} sending {:?} to {}", self.id, msg, id);
+        // println!("node {} sending {:?} to {}", self.id, msg, id);
         if self.tx.contains_key(&id) == false {
             panic!("node {} cannot find {} in {:?}", self.id, id, self.tx);
         }
@@ -279,7 +279,7 @@ impl<S : BaseSender<Message>> Node<S> {
 
         if quorum_ack {
             if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
-                println!("(zxid {}, self.committed {})", zxid, self.committed_zxid);
+                // println!("(zxid {}, self.committed {})", zxid, self.committed_zxid);
                 panic!("leader missed a zxid");
                 // return;
             }
@@ -363,7 +363,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     epoch: self.epoch,
                     msg_type: MessageType::Proposal(zxid, data),
                 };
-                println!("{:?}\n", send_msg);
+                // println!("{:?}\n", send_msg);
                 for id in 0..self.cluster_size {
                     if id != self.id {
                         self.send(id, send_msg.clone());
@@ -373,9 +373,9 @@ impl<S : BaseSender<Message>> Node<S> {
 
             MessageType::ClientQuery => {
                 if let Some((zxid, data)) = self.zab_log.latest_commit() {
-                    println!("value at node {}, zxid {}: {}", self.id, zxid, data);
+                    // println!("value at node {}, zxid {}: {}", self.id, zxid, data);
                 } else {
-                    println!("value at node {} is None", self.id);
+                    // println!("value at node {} is None", self.id);
                 }
             },
 
@@ -410,7 +410,7 @@ impl<S : BaseSender<Message>> Node<S> {
             },
             MessageType::Vote(_v) => {},
             _ => {
-                println!("Unsupported msg type for leader");
+                // println!("Unsupported msg type for leader");
             }
         };
     }
@@ -424,21 +424,21 @@ impl<S : BaseSender<Message>> Node<S> {
             },
             MessageType::ClientQuery => {
                 if let Some((zxid, data)) = self.zab_log.latest_commit() {
-                    println!("value at node {}, zxid {}: {}", self.id, zxid, data);
+                    // println!("value at node {}, zxid {}: {}", self.id, zxid, data);
                 } else {
-                    println!("value at node {} is None", self.id);
+                    // println!("value at node {} is None", self.id);
                 }
             },
 
             // TODO handle p1, p2 msgs
             MessageType::Proposal(zxid, data) => {
                 if zxid >> 32 != self.epoch {
-                    println!("Bad epoch number from leader!");
+                    // println!("Bad epoch number from leader!");
                     self.state = NodeState::Looking;
                     return;
                 }
                 if zxid != self.next_zxid && self.next_zxid & 0xffffffff != 1 {
-                    println!("Proposal - follower missed a zxid (msg zxid {}, self.next_zxid {})", zxid, self.next_zxid);
+                    // println!("Proposal - follower missed a zxid (msg zxid {}, self.next_zxid {})", zxid, self.next_zxid);
                     self.state = NodeState::Looking;
                     return;
                 }
@@ -463,7 +463,7 @@ impl<S : BaseSender<Message>> Node<S> {
             },
             MessageType::Commit(zxid) => {
                 if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
-                    println!("Commit - follower missed a zxid (msg zxid {}, self.committed_zxid + 1 {})", zxid, self.committed_zxid + 1);
+                    // println!("Commit - follower missed a zxid (msg zxid {}, self.committed_zxid + 1 {})", zxid, self.committed_zxid + 1);
                     self.state = NodeState::Looking;
                     return;
                 }
@@ -488,7 +488,7 @@ impl<S : BaseSender<Message>> Node<S> {
                 } // else, already commited, no-op
             },
             _ => {
-                println!("Unsupported msg type for follower");
+                // println!("Unsupported msg type for follower");
             }
         }
     }
@@ -516,11 +516,11 @@ impl<S : BaseSender<Message>> Node<S> {
                         // println!(" > {} got leader! {}", self.id, leader_id);
                         // I'm a follower!
                         if self.follower_p1(leader_id) {
-                            ////println!(" > {} got p1! {}", self.id, leader_id);
+                            // println!(" > {} got p1! {}", self.id, leader_id);
                             // self.state changed here if p2 successful
                             if self.follower_p2(leader_id) {
                                 
-                            ////println!(" > {} got p2! {}", self.id, leader_id);
+                            // println!(" > {} got p2! {}", self.id, leader_id);
                             }
                         }
                     }
@@ -575,7 +575,7 @@ impl<S : BaseSender<Message>> Node<S> {
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to send FollowerInfo
-                ////println!("  > ldr timeout when wait for FollowerInfo");
+                // println!("  > ldr timeout when wait for FollowerInfo");
                 return None;
             }
         }
@@ -607,12 +607,12 @@ impl<S : BaseSender<Message>> Node<S> {
                     // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
                     // f.currentEpoch <= l.currentEpoch
                     if !(follower_epoch <= self.epoch) {
-                        ////println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
+                        // println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
                     if follower_epoch == self.epoch && !(follower_z <= self.committed_zxid) {
-                        ////println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
+                        // println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     if m.insert(msg.sender_id, follower_z) == None {
@@ -627,7 +627,7 @@ impl<S : BaseSender<Message>> Node<S> {
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to ACK
-                ////println!("  > ldr timeout when wait for AckEpoch");
+                // println!("  > ldr timeout when wait for AckEpoch");
                 return None;
             }
         }

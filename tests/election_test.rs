@@ -217,7 +217,7 @@ fn n_election(params: Vec<(u64, u64, u64, u64)>, expected_result: Option<(u64, u
 
     for (id,handle) in handles {
         let res = handle.join().unwrap();
-        println!("{}", id);
+        // println!("{}", id);
         assert_eq!(res, expected_result);
     }
 }

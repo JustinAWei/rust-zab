@@ -16,7 +16,7 @@ use std::io;
 
 static LOGPATH_COUNTER : AtomicU64 = AtomicU64::new(0);
 const results_filename   : &str = "logs/results.log";
-const SLP_PROPOSAL_MS           : u64 = 2000;
+const SLP_PROPOSAL_MS           : u64 = 2500;
 const SLP_PROPOSAL_TIMEOUT_MS   : u64 = 2500;
 const SLP_LDR_ELECT5            : u64 = 3500;
 const SLP_STRAGGLER_CATCHUP     : u64 = 2500;
@@ -54,7 +54,7 @@ fn start_up_nodes(nnodes : u64, log_base : &String)
             while r.load(Ordering::SeqCst) {
                 node.main_loop();
                 if node.epoch > curr_e.load(Ordering::SeqCst) && Some(node.id) == node.leader {
-                    println!("Epoch and leader advanced! {} {}", node.epoch, node.id);
+                    // println!("Epoch and leader advanced! {} {}", node.epoch, node.id);
                     curr_l.store(node.id, Ordering::SeqCst);
                     curr_e.store(node.epoch, Ordering::SeqCst);
                 }
@@ -151,12 +151,12 @@ fn check_history_same(node_id : u64, log_base : &String, truth: &Vec<(u64, Strin
     }
 
     if node_history.len() != truth.len() {
-        println!("wrong len! hist: {:?}, truth: {:?}", node_history, truth);
+        // println!("wrong len! hist: {:?}, truth: {:?}", node_history, truth);
         return false;
     }
     for i in 0..node_history.len() {
         if node_history[i] != truth[i] {
-            println!("wrong val at idx {}!", i);
+            // println!("wrong val at idx {}!", i);
             return false;
         }
     }
@@ -1001,7 +1001,7 @@ fn network_partition_followers() {
     let p_size = 2;
     let non_ldr: Vec<usize> = (0..n).filter(|id| *id as u64 != cl.load(Ordering::SeqCst)).collect();
     let p1: Vec<_> = non_ldr.choose_multiple(&mut rand::thread_rng(), p_size).collect();
-    println!("partition {:?}", p1);
+    // println!("partition {:?}", p1);
     for i in 0..n {
         if p1.contains(&&i) {
             for j in 0..n {

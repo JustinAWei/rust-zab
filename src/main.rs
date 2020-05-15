@@ -8,7 +8,7 @@ pub mod zab_node;
 // use std::collections::{HashSet, HashMap};
 
 fn main() {
-    println!("hello world!");
+    // println!("hello world!");
     // let nnodes = 21;
     // let (nodes, _senders, _controller) = create_zab_ensemble(nnodes);
     // let mut handles = Vec::new();
@@ -45,7 +45,7 @@ fn main() {
     // thread::sleep(t);
 
     // for i in 0..1 {
-    //     println!("client proposal!");
+    //     // println!("client proposal!");
     //     _senders[&i].send(proposal.clone()).expect("nahh");
     // }
 
@@ -53,7 +53,7 @@ fn main() {
     // thread::sleep(t);
 
     // for i in 0..1 {
-    //     println!("client proposal again!");
+    //     // println!("client proposal again!");
     //     _senders[&i].send(proposal.clone()).expect("nahh");
     // }
 

@@ -26,7 +26,9 @@ impl<T : Debug + Send + Clone> BaseSender<T> for UnreliableSender<T> {
             let result = self.s.send(value);
             match result {
                 Ok(_) => {},
-                Err(e) => println!("Can't send from sender!{}", e),
+                Err(e) => {
+                    // println!("Can't send from sender!{}", e)
+                },
             }
         }
     }
