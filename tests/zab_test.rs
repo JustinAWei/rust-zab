@@ -1,21 +1,21 @@
-use rand::thread_rng;
+// use rand::thread_rng;
 use rand::seq::SliceRandom;
 use std::{thread, time};
 use zookeeper::zab_node::{Node, create_zab_ensemble};
 use zookeeper::message::{MessageType, Message, NodeState};
 use zookeeper::comm::{UnreliableSender, SenderController};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
-use std::fs::{create_dir, File};
+use std::fs::{File};
 use std::io::prelude::*;
-use std::io::BufReader;
+// use std::io::BufReader;
 use std::io;
 
-const results_filename   : &str = "logs/results.log";
-static logpath_counter : AtomicU64 = AtomicU64::new(0);
+// const results_filename   : &str = "logs/results.log";
+static LOGPATH_COUNTER : AtomicU64 = AtomicU64::new(0);
 const SLP_PROPOSAL_MS : u64 = 3000;
 const SLP_PROPOSAL_TIMEOUT_MS : u64 = 2500;
 const SLP_LDR_ELECT5 : u64 = 2500;
@@ -109,7 +109,7 @@ fn kill(node_id : u64,
 }
 
 fn get_unique_logpath() -> String {
-    let my_id = logpath_counter.fetch_add(1, Ordering::SeqCst);
+    let my_id = LOGPATH_COUNTER.fetch_add(1, Ordering::SeqCst);
     let logpath = format!("testslogs{}", my_id);
     cleanup_logpath(logpath.clone());
     return logpath;
@@ -127,7 +127,7 @@ fn get_truth(log_base : &String) -> Vec<(u64, String)> {
         // Consumes the iterator, returns an (Optional) String
         for line in lines {
             if let Ok(ip) = line {
-                let mut val : (u64, String) = serde_json::from_str(&ip).unwrap();
+                let val : (u64, String) = serde_json::from_str(&ip).unwrap();
                 results_history.push(val);
             }
         }
@@ -141,7 +141,7 @@ fn check_history_same(node_id : u64, log_base : &String, truth: &Vec<(u64, Strin
         // Consumes the iterator, returns an (Optional) String
         for line in lines {
             if let Ok(ip) = line {
-                let mut val : (String, u64, String) = serde_json::from_str(&ip).unwrap();
+                let val : (String, u64, String) = serde_json::from_str(&ip).unwrap();
                 if val.0 == "c" {
                     node_history.push((val.1, val.2));
                 }
@@ -168,7 +168,7 @@ fn check_history_prefix(node_id : u64, log_base : &String, truth: &Vec<(u64, Str
         // Consumes the iterator, returns an (Optional) String
         for line in lines {
             if let Ok(ip) = line {
-                let mut val : (String, u64, String) = serde_json::from_str(&ip).unwrap();
+                let val : (String, u64, String) = serde_json::from_str(&ip).unwrap();
                 if val.0 == "c" {
                     node_history.push((val.1, val.2));
                 }
@@ -191,7 +191,7 @@ fn check_history_prefix(node_id : u64, log_base : &String, truth: &Vec<(u64, Str
 fn sanity_check_nodes() {
     let logpath = get_unique_logpath();
     let n = 5 as usize;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, _controller, mut handles, mut running, _cl, _ce) = start_up_nodes(n as u64, &logpath);
     assert!(senders.len() == n);
     assert!(handles.len() == n);
     assert!(running.len() == n);
@@ -218,11 +218,11 @@ fn sanity_check_nodes() {
 fn test_one_ldr_others_follow() {
     let logpath = get_unique_logpath();
     let n = 5 as usize;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, _controller, mut handles, mut running, cl, _ce) = start_up_nodes(n as u64, &logpath);
     
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
-    let curr_epoch = ce.load(Ordering::SeqCst);
+    // let curr_epoch = ce.load(Ordering::SeqCst);
     let curr_ldr = cl.load(Ordering::SeqCst);
 
     let node = kill(curr_ldr, & senders, & mut handles, & mut running);
@@ -243,7 +243,7 @@ fn test_one_ldr_others_follow() {
 fn test_stable_one_proposal() {
     let logpath = get_unique_logpath();
     let n = 5 as usize;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, _controller, mut handles, mut running, _cl, _ce) = start_up_nodes(n as u64, &logpath);
     
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
@@ -382,7 +382,7 @@ fn test_kill_some_follower_nohist(n: u64, m : u64) {
 fn test_kill_1_follower_nohist() {
     let logpath = get_unique_logpath();
     let n : u64 = 5 ;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, _controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
     
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
@@ -459,7 +459,7 @@ fn test_kill_1_follower_nohist() {
 fn test_kill_1_follower_prevhist() {
     let logpath = get_unique_logpath();
     let n : u64 = 5 ;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, _controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
     
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
@@ -470,9 +470,7 @@ fn test_kill_1_follower_prevhist() {
         epoch: 1,
         msg_type: MessageType::ClientProposal(String::from("proposal00")),
     };
-    for i in 0..1 {
-        senders[&curr_ldr].send(proposal.clone()).expect("nahh");
-    }
+    senders[&curr_ldr].send(proposal.clone()).expect("nahh");
 
     let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
@@ -588,9 +586,8 @@ fn test_kill_some_follower_prevhist(n: u64, m : u64) {
         epoch: 1,
         msg_type: MessageType::ClientProposal(String::from("proposal00")),
     };
-    for i in 0..1 {
-        senders[&curr_ldr].send(proposal.clone()).expect("nahh");
-    }
+
+    senders[&curr_ldr].send(proposal.clone()).expect("nahh");
 
     let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
@@ -680,7 +677,7 @@ fn test_kill_some_follower_prevhist(n: u64, m : u64) {
 fn test_kill_leader_nohist() {
     let logpath = get_unique_logpath();
     let n : u64 = 5 ;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, _controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
     
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
@@ -781,7 +778,7 @@ fn test_kill_leader_nohist() {
 fn test_kill_leader_prevhist() {
     let logpath = get_unique_logpath();
     let n : u64 = 5 ;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, _controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
     
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
@@ -900,7 +897,7 @@ fn network_partition_followers() {
     // Setup
     let logpath = get_unique_logpath();
     let n = 5 as usize;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let (senders, controller, mut handles, mut running, cl, _ce) = start_up_nodes(n as u64, &logpath);
     assert!(senders.len() == n);
     assert!(handles.len() == n);
     assert!(running.len() == n);
