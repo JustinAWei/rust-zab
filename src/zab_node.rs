@@ -1,5 +1,5 @@
 use std::time::{Duration, Instant};
-use std::fs::File;
+use std::fs::{create_dir, File};
 use std::io::prelude::*;
 use std::sync::mpsc::{Sender, Receiver, channel, RecvTimeoutError};
 use std::collections::{HashSet, HashMap};
@@ -8,10 +8,12 @@ use chrono;
 use crate::election::LeaderElector;
 use crate::message::{MessageType, Message, NodeState};
 use crate::comm::{BaseSender, UnreliableSender, SenderController};
+use std::fs::OpenOptions;
 
 const TXN_TIMEOUT_MS : i64 = 400;
 const PH1_TIMEOUT_MS : u64 = 1600;
 const PH2_TIMEOUT_MS : u64 = 1600;
+const results_filename   : &str = "logs/results.log";
 
 pub fn create_zab_ensemble(n_nodes : u64)
     -> (HashMap<u64, Node<UnreliableSender<Message>>>,
@@ -64,7 +66,11 @@ pub struct ZabLog {
 
 impl ZabLog {
     pub fn new(i: u64) -> ZabLog {
-        let fpath = "./log".to_string() + &i.to_string();
+        // attempt to create logs directory, it might
+        //  already exist
+        create_dir("./logs");
+        let results_f = OpenOptions::new().create_new(true).write(true).open(&results_filename);
+        let fpath = format!("./logs/{}.log", i);
         ZabLog {
             commit_log: Vec::new(),
             proposal_log: Vec::new(),
@@ -90,6 +96,17 @@ impl ZabLog {
         serde_json::to_writer(&mut self.lf, &entry).unwrap();
         writeln!(&mut self.lf).unwrap();
         self.lf.flush().unwrap();
+    }
+
+    
+    pub fn record_commit_to_client(& self, zxid: u64, data: String) {
+        let entry = (zxid, data);
+        // append to file
+
+        let mut rf = OpenOptions::new().append(true).open(&results_filename).unwrap();
+        serde_json::to_writer(&mut rf, &entry).unwrap();
+        writeln!(&mut rf).unwrap();
+        rf.flush().unwrap();
     }
 
     pub fn dump(&mut self) {
@@ -316,6 +333,7 @@ impl<S : BaseSender<Message>> Node<S> {
                             }
                             // TODO: where do we record??
                             self.zab_log.record_commit(zxid, t.data.clone());
+                            self.zab_log.record_commit_to_client(zxid, t.data.clone());
                             self.committed_zxid = zxid;
                         },
                         None => {}
