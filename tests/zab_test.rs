@@ -673,10 +673,11 @@ fn test_kill_some_follower_prevhist(n: u64, m : u64) {
     cleanup_logpath(logpath);
 }
 
+#[test]
 fn test_kill_1_roundrobin() {
     let logpath = get_unique_logpath();
-    let n : u64 = 5 ;
-    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    let n : u64 = 5;
+    let (senders, _controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
     
     // wait until stable state
     let t = time::Duration::from_millis(SLP_LDR_ELECT5);
