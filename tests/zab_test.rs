@@ -17,8 +17,8 @@ use std::io;
 const results_filename   : &str = "logs/results.log";
 static logpath_counter : AtomicU64 = AtomicU64::new(0);
 const SLP_PROPOSAL_MS : u64 = 1200;
-const SLP_PROPOSAL_TIMEOUT_MS : u64 = 1600;
-const SLP_LDR_ELECT5 : u64 = 5000;
+const SLP_PROPOSAL_TIMEOUT_MS : u64 = 2500;
+const SLP_LDR_ELECT5 : u64 = 1000;
 const SLP_STRAGGLER_CATCHUP : u64 = 1800;
 
 // The output is wrapped in a Result to allow matching on errors
@@ -53,6 +53,7 @@ fn start_up_nodes(nnodes : u64, log_base : &String)
             while r.load(Ordering::SeqCst) {
                 node.main_loop();
                 if node.epoch > curr_e.load(Ordering::SeqCst) && Some(node.id) == node.leader {
+                    println!("Epoch and leader advanced! {} {}", node.epoch, node.id);
                     curr_l.store(node.id, Ordering::SeqCst);
                     curr_e.store(node.epoch, Ordering::SeqCst);
                 }
@@ -435,6 +436,108 @@ fn test_kill_1_follower_prevhist() {
 
     let truth = get_truth(&logpath);
     assert_eq!(truth.len(), 3);
+    for i in 0..n {
+        check_history_same(i as u64, &logpath, &truth);
+    }
+    cleanup_logpath(logpath);
+}
+
+
+#[test]
+fn test_kill_leader_nohist() {
+    let logpath = get_unique_logpath();
+    let n : u64 = 5 ;
+    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
+    thread::sleep(t);
+
+    let old_e = ce.load(Ordering::SeqCst);
+    let old_ldr = cl.load(Ordering::SeqCst);
+    // kill one node
+    let killed_node = kill(old_ldr, & senders, & mut handles, & mut running);
+
+    // make proposal, this should be sent to all nodes s.t. they time out
+    let proposal = Message {
+        sender_id: old_ldr,
+        epoch: old_e,
+        msg_type: MessageType::Proposal(1, String::from("proposal00")),
+    };
+    for i in 0..n {
+        if i != old_ldr {
+            senders[&i].send(proposal.clone()).expect("nahh");
+        }
+    }
+
+    // wait until new leader is elected
+    
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5 + SLP_PROPOSAL_TIMEOUT_MS);
+    thread::sleep(t);
+    let new_ldr = cl.load(Ordering::SeqCst);
+    let new_e = ce.load(Ordering::SeqCst);
+
+    assert!(new_ldr != old_ldr);
+    assert!(new_e > old_e);
+
+    // make proposal, this should be committed to all other nodes
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("proposal00")),
+    };
+    senders[&new_ldr].send(proposal.clone()).expect("nahh");
+
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+    
+    let truth = get_truth(&logpath);
+    assert_eq!(truth.len(), 1);
+    for i in 0..n {
+        if i == (&killed_node).id {
+            assert!(check_history_prefix(i as u64, &logpath, &truth));
+            // history shouldn't be same
+            assert!(!check_history_same(i as u64, &logpath, &truth));
+        } else {
+            assert!(check_history_same(i as u64, &logpath, &truth));
+        }
+    }
+
+    restart_node(killed_node, &mut handles, &senders, & running, &cl, &ce);
+
+    let t = time::Duration::from_millis(SLP_STRAGGLER_CATCHUP);
+    thread::sleep(t);
+
+    let truth = get_truth(&logpath);
+    assert_eq!(truth.len(), 1);
+    for i in 0..n {
+        check_history_same(i as u64, &logpath, &truth);
+    }
+    // make proposal, this should be committed to all nodes, including the 
+    //  one that was killed and reconnected
+    let proposal = Message {
+        sender_id: 0,
+        epoch: 1,
+        msg_type: MessageType::ClientProposal(String::from("proposal01")),
+    };
+    senders[&new_ldr].send(proposal.clone()).expect("nahh");
+
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+    thread::sleep(t);
+    // leader and epoch should have stayed the same
+    assert_eq!(new_ldr, cl.load(Ordering::SeqCst));
+    assert_eq!(new_e, ce.load(Ordering::SeqCst));
+
+    for i in 0..n {
+        let n = kill(i as u64, & senders, & mut handles, & mut running);
+        if n.id == new_ldr {
+            assert_eq!(n.state, NodeState::Leading);
+        } else {
+            assert_eq!(n.state, NodeState::Following);
+        }
+    }
+
+    let truth = get_truth(&logpath);
+    assert_eq!(truth.len(), 2);
     for i in 0..n {
         check_history_same(i as u64, &logpath, &truth);
     }
