@@ -13,9 +13,9 @@ use std::fs::OpenOptions;
 const TXN_TIMEOUT_MS : i64 = 400;
 const PH1_TIMEOUT_MS : u64 = 1600;
 const PH2_TIMEOUT_MS : u64 = 1600;
-const results_filename   : &str = "logs/results.log";
+const results_filename   : &str = "results.log";
 
-pub fn create_zab_ensemble(n_nodes : u64)
+pub fn create_zab_ensemble(n_nodes : u64, log_base : &String)
     -> (HashMap<u64, Node<UnreliableSender<Message>>>,
         HashMap<u64, Sender<Message>>,
         SenderController)
@@ -29,7 +29,7 @@ pub fn create_zab_ensemble(n_nodes : u64)
     for i in 0..n_nodes {
         let (s, r) = channel();
         let us = UnreliableSender::new(s.clone());
-        let node = Node::new(i, n_nodes, s.clone(), r);
+        let node = Node::new_with_log_base(i, n_nodes, s.clone(), r, log_base.clone());
         nodes.insert(i, node);
         u_senders.insert(i, us);
         senders.insert(i, s);
@@ -59,19 +59,22 @@ struct InflightTxn {
 }
 
 pub struct ZabLog {
+    log_base: String,
     commit_log: Vec<(u64, String)>, // TODO: timestamp?
     proposal_log: Vec<(u64, String)>, // TODO: timestamp?
     lf: File,
 }
 
 impl ZabLog {
-    pub fn new(i: u64) -> ZabLog {
+    pub fn new(i: u64, log_base: String) -> ZabLog {
         // attempt to create logs directory, it might
         //  already exist
-        create_dir("./logs");
-        let results_f = OpenOptions::new().create_new(true).write(true).open(&results_filename);
-        let fpath = format!("./logs/{}.log", i);
+        create_dir(&format!("./{}", log_base));
+        let results_path = format!("./{}/{}", log_base, &results_filename);
+        let results_f = OpenOptions::new().create_new(true).write(true).open(&results_path);
+        let fpath = format!("./{}/{}.log", log_base, i);
         ZabLog {
+            log_base: log_base,
             commit_log: Vec::new(),
             proposal_log: Vec::new(),
             lf: File::create(fpath).unwrap() // create a file
@@ -102,8 +105,8 @@ impl ZabLog {
     pub fn record_commit_to_client(& self, zxid: u64, data: String) {
         let entry = (zxid, data);
         // append to file
-
-        let mut rf = OpenOptions::new().append(true).open(&results_filename).unwrap();
+        let results_path = format!("./{}/{}", self.log_base, &results_filename);
+        let mut rf = OpenOptions::new().append(true).open(&results_path).unwrap();
         serde_json::to_writer(&mut rf, &entry).unwrap();
         writeln!(&mut rf).unwrap();
         rf.flush().unwrap();
@@ -150,7 +153,7 @@ pub struct Node<T : BaseSender<Message>> {
 }
 
 impl<S : BaseSender<Message>> Node<S> {
-    pub fn new(i: u64, cluster_size: u64, tx : Sender<Message>, rx : Receiver<Message>) -> Node<S> {
+    pub fn new_with_log_base(i: u64, cluster_size: u64, tx : Sender<Message>, rx : Receiver<Message>, log_base : String) -> Node<S> {
         assert!(cluster_size % 2 == 1);
         let quorum_size = (cluster_size + 1) / 2;
         Node {
@@ -166,8 +169,33 @@ impl<S : BaseSender<Message>> Node<S> {
             rx: rx,
             inflight_txns: HashMap::new(),
             msg_thread: timer::MessageTimer::new(tx),
-            zab_log: ZabLog::new(i as u64),
+            zab_log: ZabLog::new(i as u64, log_base),
             leader_elector: LeaderElector::new(i, 0, quorum_size.clone()),
+        }
+    }
+
+    pub fn new(i: u64, cluster_size: u64, tx : Sender<Message>, rx : Receiver<Message>) -> Node<S> {
+        return Node::new_with_log_base(i, cluster_size, tx, rx, String::from("logs"));
+    }
+
+    // preserves old channels, nodeid, quorum setup, etc
+    //   creates new node state (zablog, zxid counts, state, leader)
+    pub fn new_from(old : Node<S>, tx : Sender<Message>) -> Node<S> {
+        Node {
+            id: old.id,
+            cluster_size: old.cluster_size,
+            quorum_size: old.quorum_size.clone(),
+            state: NodeState::Looking,
+            leader: None,
+            epoch: 0,
+            committed_zxid: 0,
+            next_zxid: 1,
+            tx: old.tx,
+            rx: old.rx,
+            inflight_txns: HashMap::new(),
+            msg_thread: timer::MessageTimer::new(tx),
+            zab_log: ZabLog::new(old.id as u64, old.zab_log.log_base),
+            leader_elector: LeaderElector::new(old.id, 0, old.quorum_size),
         }
     }
 
