@@ -14,12 +14,13 @@ use std::io::prelude::*;
 // use std::io::BufReader;
 use std::io;
 
-// const results_filename   : &str = "logs/results.log";
 static LOGPATH_COUNTER : AtomicU64 = AtomicU64::new(0);
-const SLP_PROPOSAL_MS : u64 = 3000;
-const SLP_PROPOSAL_TIMEOUT_MS : u64 = 2500;
-const SLP_LDR_ELECT5 : u64 = 2500;
-const SLP_STRAGGLER_CATCHUP : u64 = 2500;
+const results_filename   : &str = "logs/results.log";
+const SLP_PROPOSAL_MS           : u64 = 2000;
+const SLP_PROPOSAL_TIMEOUT_MS   : u64 = 2500;
+const SLP_LDR_ELECT5            : u64 = 3500;
+const SLP_STRAGGLER_CATCHUP     : u64 = 2500;
+const BAD_ZXID_PROPOSAL         : u64 = 0x0fffffffffff0000;
 
 // The output is wrapped in a Result to allow matching on errors
 // Returns an Iterator to the Reader of the lines of the file.
@@ -672,6 +673,81 @@ fn test_kill_some_follower_prevhist(n: u64, m : u64) {
     cleanup_logpath(logpath);
 }
 
+fn test_kill_1_roundrobin() {
+    let logpath = get_unique_logpath();
+    let n : u64 = 5 ;
+    let (senders, controller, mut handles, mut running, cl, ce) = start_up_nodes(n as u64, &logpath);
+    
+    // wait until stable state
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
+    thread::sleep(t);
+
+    let mut curr_ldr = cl.load(Ordering::SeqCst);
+    let mut curr_epoch = ce.load(Ordering::SeqCst);
+    // kill one node
+    for i in 0..n {
+        let killed_node = kill(i as u64, & senders, & mut handles, & mut running);
+
+        if i == curr_ldr {
+            // may have killed a leader
+            // make proposal, this should be sent to all nodes s.t. they time out
+            let proposal = Message {
+                sender_id: curr_ldr,
+                epoch: curr_epoch,
+                msg_type: MessageType::Proposal(BAD_ZXID_PROPOSAL, String::from("proposal00")),
+            };
+            for i in 0..n {
+                if i != curr_ldr {
+                    senders[&i].send(proposal.clone()).expect("nahh");
+                }
+            }
+            let t = time::Duration::from_millis(SLP_LDR_ELECT5);
+            thread::sleep(t);
+                    
+            let new_ldr = cl.load(Ordering::SeqCst);
+            assert!(curr_ldr != new_ldr);
+            let new_epoch = ce.load(Ordering::SeqCst);
+            assert!(new_epoch > curr_epoch, "{} !> {}", new_epoch, curr_epoch);
+            curr_ldr = new_ldr;
+            curr_epoch = new_epoch;
+        }
+
+        // make proposal, this should be committed to all other nodes
+        let proposal = Message {
+            sender_id: 0,
+            epoch: 1,
+            msg_type: MessageType::ClientProposal(String::from("proposal")),
+        };
+        senders[&curr_ldr].send(proposal.clone()).expect("nahh");
+        
+        let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
+        thread::sleep(t);
+
+        let truth = get_truth(&logpath);
+        assert_eq!(truth.len() as u64, i + 1);
+        for i in 0..n {
+            if i == (&killed_node).id {
+                assert!(check_history_prefix(i as u64, &logpath, &truth));
+                // history shouldn't be same
+                assert!(!check_history_same(i as u64, &logpath, &truth));
+            } else {
+                assert!(check_history_same(i as u64, &logpath, &truth));
+            }
+        }
+        restart_node(killed_node, &mut handles, &senders, & running, &cl, &ce);
+
+        let t = time::Duration::from_millis(SLP_STRAGGLER_CATCHUP);
+        thread::sleep(t);
+        let truth = get_truth(&logpath);
+        assert_eq!(truth.len() as u64, i + 1);
+        for i in 0..n {
+            check_history_same(i as u64, &logpath, &truth);
+        }
+    }
+
+    
+    cleanup_logpath(logpath);
+}
 
 #[test]
 fn test_kill_leader_nohist() {
@@ -691,7 +767,7 @@ fn test_kill_leader_nohist() {
     let proposal = Message {
         sender_id: old_ldr,
         epoch: old_e,
-        msg_type: MessageType::Proposal(1, String::from("proposal00")),
+        msg_type: MessageType::Proposal(BAD_ZXID_PROPOSAL, String::from("proposal00")),
     };
     for i in 0..n {
         if i != old_ldr {
@@ -809,7 +885,7 @@ fn test_kill_leader_prevhist() {
     let proposal = Message {
         sender_id: old_ldr,
         epoch: old_e,
-        msg_type: MessageType::Proposal(1, String::from("proposal00")),
+        msg_type: MessageType::Proposal(BAD_ZXID_PROPOSAL, String::from("proposal00")),
     };
     for i in 0..n {
         if i != old_ldr {

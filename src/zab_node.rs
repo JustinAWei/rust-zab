@@ -432,6 +432,11 @@ impl<S : BaseSender<Message>> Node<S> {
 
             // TODO handle p1, p2 msgs
             MessageType::Proposal(zxid, data) => {
+                if zxid >> 32 != self.epoch {
+                    println!("Bad epoch number from leader!");
+                    self.state = NodeState::Looking;
+                    return;
+                }
                 if zxid != self.next_zxid && self.next_zxid & 0xffffffff != 1 {
                     println!("Proposal - follower missed a zxid (msg zxid {}, self.next_zxid {})", zxid, self.next_zxid);
                     self.state = NodeState::Looking;
