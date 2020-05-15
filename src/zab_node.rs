@@ -327,6 +327,10 @@ impl<S : BaseSender<Message>> Node<S> {
                 }
             },
 
+            MessageType::ReturnToMainloop => {
+                return;
+            },
+
             MessageType::Ack(zxid) => {
                 let mut quorum_ack : bool = false;
                 match self.inflight_txns.get_mut(&zxid) {
@@ -430,6 +434,9 @@ impl<S : BaseSender<Message>> Node<S> {
                 }
             },
             MessageType::Vote(_v) => {},
+            MessageType::ReturnToMainloop => {
+                return;
+            },
             _ => {
                 println!("Unsupported msg type for follower");
             }
@@ -511,6 +518,8 @@ impl<S : BaseSender<Message>> Node<S> {
                     if m.len() >= self.quorum_size as usize {
                         break;
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return None;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -553,6 +562,8 @@ impl<S : BaseSender<Message>> Node<S> {
                     if m.len() >= self.quorum_size as usize {
                         return Some(m);
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return None;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -598,6 +609,8 @@ impl<S : BaseSender<Message>> Node<S> {
                         }
                         return true;
                     }
+                } else if leaderinfo.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -629,6 +642,8 @@ impl<S : BaseSender<Message>> Node<S> {
                     if acks.len() >= self.quorum_size as usize {
                         break;
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -680,8 +695,10 @@ impl<S : BaseSender<Message>> Node<S> {
                         self.send(msg.sender_id, ack_msg);
                         break;
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
-            };
+            }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for leader candidate response
                 return false;
@@ -695,6 +712,8 @@ impl<S : BaseSender<Message>> Node<S> {
             if let Some(msg) = msg_option {
                 if msg.sender_id == leader_id && msg.msg_type == MessageType::UpToDate {
                     break;
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
             };
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {

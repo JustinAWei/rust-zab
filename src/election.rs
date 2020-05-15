@@ -91,8 +91,11 @@ impl LeaderElector {
                 // implement exponential backoff
                 // log?
                 continue;
-            }
+            } 
             let msg = msg_result.unwrap();
+            if msg.msg_type == MessageType::ReturnToMainloop {
+                return None;
+            }
             let (is_vote, vote, need_reply) = is_vote_msg(&msg);
             if ! is_vote  {
                 // currently in Looking state, so we don't process other msg types
