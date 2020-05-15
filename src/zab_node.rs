@@ -13,7 +13,7 @@ use std::fs::OpenOptions;
 const TXN_TIMEOUT_MS : i64 = 400;
 const PH1_TIMEOUT_MS : u64 = 1600;
 const PH2_TIMEOUT_MS : u64 = 1600;
-const results_filename   : &str = "results.log";
+const RESULTS_FILENAME   : &str = "results.log";
 
 pub fn create_zab_ensemble(n_nodes : u64, log_base : &String)
     -> (HashMap<u64, Node<UnreliableSender<Message>>>,
@@ -70,8 +70,8 @@ impl ZabLog {
         // attempt to create logs directory, it might
         //  already exist
         create_dir(&format!("./{}", log_base));
-        let results_path = format!("./{}/{}", log_base, &results_filename);
-        let results_f = OpenOptions::new().create_new(true).write(true).open(&results_path);
+        let results_path = format!("./{}/{}", log_base, &RESULTS_FILENAME);
+        let _results_f = OpenOptions::new().create_new(true).write(true).open(&results_path);
         let fpath = format!("./{}/{}.log", log_base, i);
         ZabLog {
             log_base: log_base,
@@ -105,7 +105,7 @@ impl ZabLog {
     pub fn record_commit_to_client(& self, zxid: u64, data: String) {
         let entry = (zxid, data);
         // append to file
-        let results_path = format!("./{}/{}", self.log_base, &results_filename);
+        let results_path = format!("./{}/{}", self.log_base, &RESULTS_FILENAME);
         let mut rf = OpenOptions::new().append(true).open(&results_path).unwrap();
         serde_json::to_writer(&mut rf, &entry).unwrap();
         writeln!(&mut rf).unwrap();
@@ -701,7 +701,7 @@ impl<S : BaseSender<Message>> Node<S> {
                         epoch: 0,
                     };
                     self.send(msg.sender_id, new_msg);
-                } else if let MessageType::AckEpoch(follower_z, follower_epoch) = msg.msg_type {
+                } else if let MessageType::AckEpoch(follower_z, _follower_epoch) = msg.msg_type {
                     self.sync_with_follower(msg.sender_id, follower_z, proposed_epoch);
                 } else if let MessageType::Ack(zxid) = msg.msg_type {
                     assert!(zxid == proposed_epoch << 32, "{} != {} << 32", zxid, proposed_epoch);
