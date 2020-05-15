@@ -136,8 +136,8 @@ pub struct Node<T : BaseSender<Message>> {
     cluster_size: u64,
     quorum_size: u64,
     pub state: NodeState,
-    leader: Option<u64>,
-    epoch: u64,
+    pub leader: Option<u64>,
+    pub epoch: u64,
     // TODO why dis i
     committed_zxid: u64,
     next_zxid: u64,
@@ -409,50 +409,48 @@ impl<S : BaseSender<Message>> Node<S> {
     }
 
     pub fn main_loop(&mut self) {
-        loop {
-            match self.state {
-                NodeState::Looking => {
-                    let result = self.leader_elector.look_for_leader(
-                        & mut self.rx,
-                        & mut self.tx,
-                        self.epoch + 1,
-                        self.committed_zxid);
-                    if let Some((proposed_epoch, leader_id)) = result {
-                        if !(leader_id == self.id || self.tx.contains_key(&leader_id)) {
-                            panic!("Node {} got {} leader, but {} node does not exist", self.id, leader_id, leader_id)
+        match self.state {
+            NodeState::Looking => {
+                let result = self.leader_elector.look_for_leader(
+                    & mut self.rx,
+                    & mut self.tx,
+                    self.epoch + 1,
+                    self.committed_zxid);
+                if let Some((proposed_epoch, leader_id)) = result {
+                    if !(leader_id == self.id || self.tx.contains_key(&leader_id)) {
+                        panic!("Node {} got {} leader, but {} node does not exist", self.id, leader_id, leader_id)
+                    }
+                    if leader_id == self.id {
+                        // I'm leader candidate!
+                        let result = self.leader_p1(proposed_epoch);
+                        if let Some(connected_followers) = result {
+                            // self.state changed here if p2 successful
+                            self.leader_p2(connected_followers, proposed_epoch);
                         }
-                        if leader_id == self.id {
-                            // I'm leader candidate!
-                            let result = self.leader_p1(proposed_epoch);
-                            if let Some(connected_followers) = result {
-                                // self.state changed here if p2 successful
-                                self.leader_p2(connected_followers, proposed_epoch);
-                            }
-                        } else {
-                            // I'm a follower!
-                            if self.follower_p1(leader_id) {
-                                // self.state changed here if p2 successful
-                                self.follower_p2(leader_id);
-                            }
+                    } else {
+                        // I'm a follower!
+                        if self.follower_p1(leader_id) {
+                            // self.state changed here if p2 successful
+                            self.follower_p2(leader_id);
                         }
                     }
-                    // if self.state has not been changed,
-                    //  something failed, state is still looking and we will
-                    //  call look_for_leader again in next iteration
-                    println!("{} state now {:?} {:?}", self.id, self.state, self.leader);
-                    // if (self.state == NodeState::Looking) {
-                    //      // just leave so we can debug T.T
-                    //     break;
-                    // }
-                },
-                NodeState::Leading => {
-                    let msg = self.receive();
-                    self.process_leader(msg);
-                },
-                NodeState::Following => {
-                    let msg = self.receive();
-                    self.process_follower(msg);
                 }
+                // if self.state has not been changed,
+                //  something failed, state is still looking and we will
+                //  call look_for_leader again in next iteration
+                println!("{} state now {:?} {:?}", self.id, self.state, self.leader);
+                // if (self.state == NodeState::Looking) {
+                //      // just leave so we can debug T.T
+                //     break;
+                // }
+            },
+            NodeState::Leading => {
+                let msg = self.receive();
+                self.process_leader(msg);
+            },
+            NodeState::Following => {
+                let msg = self.receive();
+                self.process_follower(msg);
             }
         }
     }
