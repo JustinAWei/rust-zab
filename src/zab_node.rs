@@ -437,7 +437,7 @@ impl<S : BaseSender<Message>> Node<S> {
                     self.state = NodeState::Looking;
                     return;
                 }
-                self.next_zxid += 1;
+                self.next_zxid = zxid + 1;
 
                 let txn = InflightTxn {
                     data: data.clone(),
