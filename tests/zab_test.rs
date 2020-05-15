@@ -167,6 +167,9 @@ fn sanity_check_nodes() {
     }
 }
 
+const SLP_PROPOSAL_MS : u64 = 800;
+const SLP_PROPOSAL_TIMEOUT_MS : u64 = 1200;
+const SLP_LDR_ELECT5 : u64 = 3000;
 #[test]
 fn network_partition_followers() {
     // Setup
@@ -176,7 +179,7 @@ fn network_partition_followers() {
     assert!(handles.len() == n);
     assert!(running.len() == n);
 
-    let t = time::Duration::from_millis(5000);
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
 
     // Initial proposal
@@ -186,7 +189,7 @@ fn network_partition_followers() {
         msg_type: MessageType::ClientProposal(String::from("suhh")),
     };
     senders[&0].send(proposal.clone()).expect("nahh");
-    let t = time::Duration::from_millis(500);
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
 
     // Check invariants
@@ -219,7 +222,7 @@ fn network_partition_followers() {
     };
     let p_follower = *p1[0] as u64;
     senders[&p_follower].send(proposal.clone()).expect("nahh");
-    let t = time::Duration::from_millis(500);
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
 
     // Check invariants (no new commits)
@@ -235,7 +238,7 @@ fn network_partition_followers() {
         msg_type: MessageType::ClientProposal(String::from("suhh1")),
     };
     senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("nahh");
-    let t = time::Duration::from_millis(500);
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
 
     // Check invariants (quorum should have committed, partition should not have)
@@ -256,7 +259,7 @@ fn network_partition_followers() {
             controller.make_sender_ok(j as u64, i as u64);
         }
     }
-    let t = time::Duration::from_millis(500);
+    let t = time::Duration::from_millis(SLP_PROPOSAL_MS);
     thread::sleep(t);
     let proposal = Message {
         sender_id: 0,
@@ -264,8 +267,13 @@ fn network_partition_followers() {
         msg_type: MessageType::ClientProposal(String::from("suhh2")),
     };
     senders[&cl.load(Ordering::SeqCst)].send(proposal.clone()).expect("nahh");
-    let t = time::Duration::from_millis(10000);
+    let t = time::Duration::from_millis(SLP_LDR_ELECT5);
     thread::sleep(t);
+    
+    for i in 0..n {
+        kill(i as u64, & senders, & mut handles, & mut running);
+    }
+    
 
     // Check invariants (all should commit)
     let truth = get_truth();

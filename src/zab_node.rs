@@ -110,6 +110,8 @@ impl ZabLog {
     }
 
     pub fn dump(&mut self) {
+        self.lf.set_len(0); // empty file
+        self.lf.seek(std::io::SeekFrom::Start(0));
         for (zxid, data) in &self.commit_log {
             let entry = ("c", zxid, data);
 
@@ -194,7 +196,6 @@ impl<S : BaseSender<Message>> Node<S> {
                 if self.state == NodeState::Looking {
                     self.leader_elector.send_last_vote(self.epoch, self.state, &self.tx[&msg.sender_id]);
                 } else {
-                    println!("{} INVITING {}", self.id, msg.sender_id);
                     self.leader_elector.invite_straggler(
                         self.leader.unwrap(),
                         self.committed_zxid,
@@ -234,24 +235,29 @@ impl<S : BaseSender<Message>> Node<S> {
     }
 
     fn process_leader(&mut self, msg: Message) {
-        if msg.epoch != self.epoch {
-            // note : this might happen for followerinfo, vote, etc
-            println!("epoch mismatch: sender_e {} = {} my_e {} = {} [{:?}]", msg.sender_id, msg.epoch, self.id, self.epoch, msg.msg_type);
-        };
         match msg.msg_type {
             // TODO handle p1, p2 msgs
-            MessageType::FollowerInfo(_fepoch, _) => {
+            MessageType::FollowerInfo(fepoch, _) => {
                 // respond to follower's phase 1 message
                 let new_msg = Message {
                     msg_type: MessageType::LeaderInfo(self.epoch),
                     sender_id: self.id,
-                    epoch: 0,
+                    epoch: self.epoch,
                 };
-                self.send(msg.sender_id, new_msg)
+                self.send(msg.sender_id, new_msg);
+                if fepoch == self.epoch {
+                    // follower briefly disconnected, we only need to send them recent history
+                    self.sync_with_follower(msg.sender_id, self.epoch << 32, self.epoch);
+                    let new_msg = Message {
+                        msg_type: MessageType::UpToDate,
+                        sender_id: self.id,
+                        epoch: self.epoch,
+                    };
+                    self.send(msg.sender_id, new_msg);
+                } 
             }
 
             MessageType::AckEpoch(follower_z, _follower_epoch) => {
-                println!("fuck this shit");
                 // respond to follower's phase 1 message
                 //  this will start follower's phase 2
                 self.sync_with_follower(msg.sender_id, follower_z, self.epoch);
@@ -302,6 +308,9 @@ impl<S : BaseSender<Message>> Node<S> {
             },
 
             MessageType::Ack(zxid) => {
+                if msg.epoch != self.epoch {
+                    panic!("epoch mismatch: sender_e {} = {} my_e {} = {}", msg.sender_id, msg.epoch, self.id, self.epoch);
+                };
                 let mut quorum_ack : bool = false;
                 match self.inflight_txns.get_mut(&zxid) {
                     Some(t) => {
@@ -432,21 +441,22 @@ impl<S : BaseSender<Message>> Node<S> {
                             self.leader_p2(connected_followers, proposed_epoch);
                         }
                     } else {
+                        // println!(" > {} got leader! {}", self.id, leader_id);
                         // I'm a follower!
                         if self.follower_p1(leader_id) {
+                            //printlnln!(" > {} got p1! {}", self.id, leader_id);
                             // self.state changed here if p2 successful
-                            self.follower_p2(leader_id);
+                            if self.follower_p2(leader_id) {
+                                
+                            //printlnln!(" > {} got p2! {}", self.id, leader_id);
+                            }
                         }
                     }
                 }
                 // if self.state has not been changed,
                 //  something failed, state is still looking and we will
                 //  call look_for_leader again in next iteration
-                println!("{} state now {:?} {:?}", self.id, self.state, self.leader);
-                // if (self.state == NodeState::Looking) {
-                //      // just leave so we can debug T.T
-                //     break;
-                // }
+                // println!("{} state now {:?} {:?}", self.id, self.state, self.leader);
             },
             NodeState::Leading => {
                 let msg = self.receive();
@@ -491,7 +501,7 @@ impl<S : BaseSender<Message>> Node<S> {
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to send FollowerInfo
-                println!("  > ldr timeout when wait for FollowerInfo");
+                //printlnln!("  > ldr timeout when wait for FollowerInfo");
                 return None;
             }
         }
@@ -515,12 +525,12 @@ impl<S : BaseSender<Message>> Node<S> {
                     // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
                     // f.currentEpoch <= l.currentEpoch
                     if !(follower_epoch <= self.epoch) {
-                        println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
+                        //printlnln!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
                     if follower_epoch == self.epoch && !(follower_z <= self.committed_zxid) {
-                        println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
+                        //printlnln!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     if m.insert(msg.sender_id, follower_z) == None {
@@ -533,7 +543,7 @@ impl<S : BaseSender<Message>> Node<S> {
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to ACK
-                println!("  > ldr timeout when wait for AckEpoch");
+                //printlnln!("  > ldr timeout when wait for AckEpoch");
                 return None;
             }
         }
@@ -542,7 +552,6 @@ impl<S : BaseSender<Message>> Node<S> {
 
     fn follower_p1(&mut self, leader_id: u64) -> bool {
         // f Followers connect the the leader and send FOLLOWERINFO.
-        println!("follower {} entering p1 with leaderid {}", self.id, leader_id);
         let msg = Message {
             msg_type: MessageType::FollowerInfo(self.epoch, "".to_string()),
             sender_id: self.id,
