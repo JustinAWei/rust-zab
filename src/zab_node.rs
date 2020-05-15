@@ -92,8 +92,11 @@ impl ZabLog {
         self.lf.flush().unwrap();
     }
 
-    pub fn latest_commit(&mut self) -> (u64, String) {
-        return self.commit_log[self.commit_log.len() - 1].clone();
+    pub fn latest_commit(&mut self) -> Option<(u64, String)> {
+        if self.commit_log.len() == 0 {
+            return None;
+        }
+        return Some(self.commit_log[self.commit_log.len() - 1].clone());
     }
 }
 
@@ -261,8 +264,11 @@ impl<S : BaseSender<Message>> Node<S> {
             },
 
             MessageType::ClientQuery => {
-                let (zxid, data) = self.zab_log.latest_commit();
-                println!("value at node {}, zxid {}: {}", self.id, zxid, data);
+                if let Some((zxid, data)) = self.zab_log.latest_commit() {
+                    println!("value at node {}, zxid {}: {}", self.id, zxid, data);
+                } else {
+                    println!("value at node {} is None", self.id);
+                }
             },
 
             MessageType::Ack(zxid) => {
@@ -320,8 +326,11 @@ impl<S : BaseSender<Message>> Node<S> {
                 self.send(self.leader.unwrap(), msg.clone());
             },
             MessageType::ClientQuery => {
-                let (zxid, data) = self.zab_log.latest_commit();
-                println!("value at node {}, zxid {}: {}", self.id, zxid, data);
+                if let Some((zxid, data)) = self.zab_log.latest_commit() {
+                    println!("value at node {}, zxid {}: {}", self.id, zxid, data);
+                } else {
+                    println!("value at node {} is None", self.id);
+                }
             },
 
             // TODO handle p1, p2 msgs
