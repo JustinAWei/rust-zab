@@ -57,6 +57,7 @@ pub enum MessageType {
 
     // Testing message types
     ClientQuery,
+    ReturnToMainloop,
 }
 
 #[derive(Clone, Debug)]

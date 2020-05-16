@@ -13,9 +13,9 @@ use std::fs::OpenOptions;
 const TXN_TIMEOUT_MS : i64 = 400;
 const PH1_TIMEOUT_MS : u64 = 1600;
 const PH2_TIMEOUT_MS : u64 = 1600;
-const results_filename   : &str = "logs/results.log";
+const RESULTS_FILENAME   : &str = "results.log";
 
-pub fn create_zab_ensemble(n_nodes : u64)
+pub fn create_zab_ensemble(n_nodes : u64, log_base : &String)
     -> (HashMap<u64, Node<UnreliableSender<Message>>>,
         HashMap<u64, Sender<Message>>,
         SenderController)
@@ -29,7 +29,7 @@ pub fn create_zab_ensemble(n_nodes : u64)
     for i in 0..n_nodes {
         let (s, r) = channel();
         let us = UnreliableSender::new(s.clone());
-        let node = Node::new(i, n_nodes, s.clone(), r);
+        let node = Node::new_with_log_base(i, n_nodes, s.clone(), r, log_base.clone());
         nodes.insert(i, node);
         u_senders.insert(i, us);
         senders.insert(i, s);
@@ -59,19 +59,22 @@ struct InflightTxn {
 }
 
 pub struct ZabLog {
+    log_base: String,
     commit_log: Vec<(u64, String)>, // TODO: timestamp?
     proposal_log: Vec<(u64, String)>, // TODO: timestamp?
     lf: File,
 }
 
 impl ZabLog {
-    pub fn new(i: u64) -> ZabLog {
+    pub fn new(i: u64, log_base: String) -> ZabLog {
         // attempt to create logs directory, it might
         //  already exist
-        create_dir("./logs");
-        let results_f = OpenOptions::new().create_new(true).write(true).open(&results_filename);
-        let fpath = format!("./logs/{}.log", i);
+        create_dir(&format!("./{}", log_base));
+        let results_path = format!("./{}/{}", log_base, &RESULTS_FILENAME);
+        let _results_f = OpenOptions::new().create_new(true).write(true).open(&results_path);
+        let fpath = format!("./{}/{}.log", log_base, i);
         ZabLog {
+            log_base: log_base,
             commit_log: Vec::new(),
             proposal_log: Vec::new(),
             lf: File::create(fpath).unwrap() // create a file
@@ -102,14 +105,16 @@ impl ZabLog {
     pub fn record_commit_to_client(& self, zxid: u64, data: String) {
         let entry = (zxid, data);
         // append to file
-
-        let mut rf = OpenOptions::new().append(true).open(&results_filename).unwrap();
+        let results_path = format!("./{}/{}", self.log_base, &RESULTS_FILENAME);
+        let mut rf = OpenOptions::new().append(true).open(&results_path).unwrap();
         serde_json::to_writer(&mut rf, &entry).unwrap();
         writeln!(&mut rf).unwrap();
         rf.flush().unwrap();
     }
 
     pub fn dump(&mut self) {
+        self.lf.set_len(0); // empty file
+        self.lf.seek(std::io::SeekFrom::Start(0));
         for (zxid, data) in &self.commit_log {
             let entry = ("c", zxid, data);
 
@@ -150,7 +155,7 @@ pub struct Node<T : BaseSender<Message>> {
 }
 
 impl<S : BaseSender<Message>> Node<S> {
-    pub fn new(i: u64, cluster_size: u64, tx : Sender<Message>, rx : Receiver<Message>) -> Node<S> {
+    pub fn new_with_log_base(i: u64, cluster_size: u64, tx : Sender<Message>, rx : Receiver<Message>, log_base : String) -> Node<S> {
         assert!(cluster_size % 2 == 1);
         let quorum_size = (cluster_size + 1) / 2;
         Node {
@@ -166,8 +171,33 @@ impl<S : BaseSender<Message>> Node<S> {
             rx: rx,
             inflight_txns: HashMap::new(),
             msg_thread: timer::MessageTimer::new(tx),
-            zab_log: ZabLog::new(i as u64),
+            zab_log: ZabLog::new(i as u64, log_base),
             leader_elector: LeaderElector::new(i, 0, quorum_size.clone()),
+        }
+    }
+
+    pub fn new(i: u64, cluster_size: u64, tx : Sender<Message>, rx : Receiver<Message>) -> Node<S> {
+        return Node::new_with_log_base(i, cluster_size, tx, rx, String::from("logs"));
+    }
+
+    // preserves old channels, nodeid, quorum setup, etc
+    //   creates new node state (zablog, zxid counts, state, leader)
+    pub fn new_from(old : Node<S>, tx : Sender<Message>) -> Node<S> {
+        Node {
+            id: old.id,
+            cluster_size: old.cluster_size,
+            quorum_size: old.quorum_size.clone(),
+            state: NodeState::Looking,
+            leader: None,
+            epoch: 0,
+            committed_zxid: 0,
+            next_zxid: 1,
+            tx: old.tx,
+            rx: old.rx,
+            inflight_txns: HashMap::new(),
+            msg_thread: timer::MessageTimer::new(tx),
+            zab_log: ZabLog::new(old.id as u64, old.zab_log.log_base),
+            leader_elector: LeaderElector::new(old.id, 0, old.quorum_size),
         }
     }
 
@@ -232,21 +262,71 @@ impl<S : BaseSender<Message>> Node<S> {
         }
     }
 
-    fn process_leader(&mut self, msg: Message) {
-        if msg.epoch != self.epoch {
-            // note : this might happen for followerinfo, vote, etc
-            println!("~~~bad things have happened, ooh spooky~~~ sender_e = {} my_e = {}", msg.epoch, self.epoch);
+    // If transaction is still inflight, check for quorum and perform 2pc
+    //  otherwise, no-op
+    // it is safe to call this multiple times
+    // returns true if this call successfully commited 2pc
+    fn leader_try_commit_txn(& mut self, zxid : u64) -> bool {
+        let mut quorum_ack : bool = false;
+        match self.inflight_txns.get_mut(&zxid) {
+            Some(t) => {
+                if t.ack_ids.len() as u64 >= self.quorum_size {
+                    quorum_ack = true
+                }
+            },
+            None => {},
         };
+
+        if quorum_ack {
+            if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
+                println!("(zxid {}, self.committed {})", zxid, self.committed_zxid);
+                panic!("leader missed a zxid");
+                // return;
+            }
+            if let Some(t) = self.inflight_txns.remove(&zxid) {
+                // handle quorum
+                // we can first send to followers before writing in our own logs
+                let send_msg = Message {
+                    sender_id: self.id,
+                    epoch: self.epoch,
+                    msg_type: MessageType::Commit(zxid),
+                };
+                for id in 0..self.cluster_size {
+                    if id != self.id {
+                        self.send(id, send_msg.clone());
+                    }
+                }
+                // TODO: where do we record??
+                self.zab_log.record_commit(zxid, t.data.clone());
+                self.zab_log.record_commit_to_client(zxid, t.data.clone());
+                self.committed_zxid = zxid;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn process_leader(&mut self, msg: Message) {
         match msg.msg_type {
             // TODO handle p1, p2 msgs
-            MessageType::FollowerInfo(_fepoch, _) => {
+            MessageType::FollowerInfo(fepoch, _) => {
                 // respond to follower's phase 1 message
                 let new_msg = Message {
                     msg_type: MessageType::LeaderInfo(self.epoch),
                     sender_id: self.id,
-                    epoch: 0,
+                    epoch: self.epoch,
                 };
-                self.send(msg.sender_id, new_msg)
+                self.send(msg.sender_id, new_msg);
+                if fepoch == self.epoch {
+                    // follower briefly disconnected, we only need to send them recent history
+                    self.sync_with_follower(msg.sender_id, self.epoch << 32, self.epoch);
+                    let new_msg = Message {
+                        msg_type: MessageType::UpToDate,
+                        sender_id: self.id,
+                        epoch: self.epoch,
+                    };
+                    self.send(msg.sender_id, new_msg);
+                } 
             }
 
             MessageType::AckEpoch(follower_z, _follower_epoch) => {
@@ -299,45 +379,33 @@ impl<S : BaseSender<Message>> Node<S> {
                 }
             },
 
-            MessageType::Ack(zxid) => {
-                let mut quorum_ack : bool = false;
-                match self.inflight_txns.get_mut(&zxid) {
-                    Some(t) => {
-                        t.ack_ids.insert(msg.sender_id);
-                        if t.ack_ids.len() as u64 >= self.quorum_size {
-                            quorum_ack = true
-                        }
-                    },
-                    None => {},
-                };
+            MessageType::ReturnToMainloop => {
+                return;
+            },
 
-                if quorum_ack {
-                    if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
-                        println!("(zxid {}, self.committed {})", zxid, self.committed_zxid);
-                        panic!("leader missed a zxid");
-                        // return;
-                    }
-                    match self.inflight_txns.remove(&zxid) {
-                        Some(t) => {
-                            // handle quorum
-                            // we can first send to followers before writing in our own logs
-                            let send_msg = Message {
-                                sender_id: self.id,
-                                epoch: self.epoch,
-                                msg_type: MessageType::Commit(zxid),
-                            };
-                            for id in 0..self.cluster_size {
-                                if id != self.id {
-                                    self.send(id, send_msg.clone());
-                                }
-                            }
-                            // TODO: where do we record??
-                            self.zab_log.record_commit(zxid, t.data.clone());
-                            self.zab_log.record_commit_to_client(zxid, t.data.clone());
-                            self.committed_zxid = zxid;
-                        },
-                        None => {}
-                    }
+            MessageType::Ack(zxid) => {
+                if msg.epoch != self.epoch {
+                    panic!("epoch mismatch: sender_e {} = {} my_e {} = {}", msg.sender_id, msg.epoch, self.id, self.epoch);
+                };
+                let mut check_quorum : bool = false;
+                if let Some(t) =  self.inflight_txns.get_mut(&zxid) {
+                    t.ack_ids.insert(msg.sender_id);
+                    check_quorum = true;
+                };
+                if check_quorum {
+                    self.leader_try_commit_txn(zxid);
+                }
+            },
+            MessageType::InternalTimeout(zxid) => {
+                // check if txid was committed
+                if zxid <= self.committed_zxid {
+                    // already commited, no-op
+                } else if self.leader_try_commit_txn(zxid) {
+                    // attempt to commit found a quorum, no-op
+                } else {
+                    // txn timed out, no quorum
+                    self.state = NodeState::Looking;
+                    return;
                 }
             },
             MessageType::Vote(_v) => {},
@@ -364,11 +432,17 @@ impl<S : BaseSender<Message>> Node<S> {
 
             // TODO handle p1, p2 msgs
             MessageType::Proposal(zxid, data) => {
-                if zxid != self.next_zxid && self.next_zxid & 0xffffffff != 1 {
-                    println!("Proposal - follower missed a zxid (msg zxid {}, self.next_zxid {})", zxid, self.next_zxid);
+                if zxid >> 32 != self.epoch {
+                    println!("Bad epoch number from leader!");
+                    self.state = NodeState::Looking;
                     return;
                 }
-                self.next_zxid += 1;
+                if zxid != self.next_zxid && self.next_zxid & 0xffffffff != 1 {
+                    println!("Proposal - follower missed a zxid (msg zxid {}, self.next_zxid {})", zxid, self.next_zxid);
+                    self.state = NodeState::Looking;
+                    return;
+                }
+                self.next_zxid = zxid + 1;
 
                 let txn = InflightTxn {
                     data: data.clone(),
@@ -390,6 +464,7 @@ impl<S : BaseSender<Message>> Node<S> {
             MessageType::Commit(zxid) => {
                 if zxid &0xffffffff != 1 && zxid != self.committed_zxid + 1 {
                     println!("Commit - follower missed a zxid (msg zxid {}, self.committed_zxid + 1 {})", zxid, self.committed_zxid + 1);
+                    self.state = NodeState::Looking;
                     return;
                 }
 
@@ -402,13 +477,23 @@ impl<S : BaseSender<Message>> Node<S> {
                 }
             },
             MessageType::Vote(_v) => {},
+            MessageType::ReturnToMainloop => {
+                return;
+            },
+            MessageType::InternalTimeout(zxid) => {
+                if zxid > self.committed_zxid {
+                    // txn timed out, no commit received
+                    self.state = NodeState::Looking;
+                    return;
+                } // else, already commited, no-op
+            },
             _ => {
                 println!("Unsupported msg type for follower");
             }
         }
     }
 
-    pub fn main_loop(&mut self) {
+    pub fn process(&mut self) {
         match self.state {
             NodeState::Looking => {
                 let result = self.leader_elector.look_for_leader(
@@ -428,21 +513,22 @@ impl<S : BaseSender<Message>> Node<S> {
                             self.leader_p2(connected_followers, proposed_epoch);
                         }
                     } else {
+                        // println!(" > {} got leader! {}", self.id, leader_id);
                         // I'm a follower!
                         if self.follower_p1(leader_id) {
+                            ////println!(" > {} got p1! {}", self.id, leader_id);
                             // self.state changed here if p2 successful
-                            self.follower_p2(leader_id);
+                            if self.follower_p2(leader_id) {
+                                
+                            ////println!(" > {} got p2! {}", self.id, leader_id);
+                            }
                         }
                     }
                 }
                 // if self.state has not been changed,
                 //  something failed, state is still looking and we will
                 //  call look_for_leader again in next iteration
-                println!("{} state now {:?} {:?}", self.id, self.state, self.leader);
-                // if (self.state == NodeState::Looking) {
-                //      // just leave so we can debug T.T
-                //     break;
-                // }
+                // println!("{} state now {:?} {:?}", self.id, self.state, self.leader);
             },
             NodeState::Leading => {
                 let msg = self.receive();
@@ -480,14 +566,16 @@ impl<S : BaseSender<Message>> Node<S> {
                     if m.insert(msg.sender_id, true) == None {
                         last_recv = Instant::now();
                     }
-                    if m.len() >= self.quorum_size as usize {
+                    if m.len() >= (self.quorum_size - 1) as usize {
                         break;
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return None;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to send FollowerInfo
-                println!("  > ldr timeout when wait for FollowerInfo");
+                ////println!("  > ldr timeout when wait for FollowerInfo");
                 return None;
             }
         }
@@ -507,29 +595,39 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_timeout = self.receive_timeout(Duration::from_millis(PH1_TIMEOUT_MS));
             if let Some(msg) = msg_timeout {
-                if let MessageType::AckEpoch(follower_z, follower_epoch) = msg.msg_type {
+                if let MessageType::FollowerInfo(_fepoch, _) = msg.msg_type {
+                    // sends LEADERINFO(e) to all followers, where e is greater than all f.acceptedEpoch in the quorum
+                    let new_msg = Message {
+                        msg_type: MessageType::LeaderInfo(le_epoch),
+                        sender_id: self.id,
+                        epoch: 0,
+                    };
+                    self.send(msg.sender_id, new_msg);
+                } else if let MessageType::AckEpoch(follower_z, follower_epoch) = msg.msg_type {
                     // l If the following conditions are not met for all connected followers, the leader disconnects followers and goes back to leader election:
                     // f.currentEpoch <= l.currentEpoch
                     if !(follower_epoch <= self.epoch) {
-                        println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
+                        ////println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     // if f.currentEpoch == l.currentEpoch, then f.lastZxid <= l.lastZxid
                     if follower_epoch == self.epoch && !(follower_z <= self.committed_zxid) {
-                        println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
+                        ////println!("  > {} ldr found better candidate {} {} (own is {} {})", self.id, follower_epoch, follower_z, self.epoch, self.committed_zxid);
                         return None;
                     }
                     if m.insert(msg.sender_id, follower_z) == None {
                         last_recv = Instant::now();
                     }
-                    if m.len() >= self.quorum_size as usize {
+                    if m.len() >= (self.quorum_size - 1) as usize {
                         return Some(m);
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return None;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for a quorum of followers to ACK
-                println!("  > ldr timeout when wait for AckEpoch");
+                ////println!("  > ldr timeout when wait for AckEpoch");
                 return None;
             }
         }
@@ -570,6 +668,8 @@ impl<S : BaseSender<Message>> Node<S> {
                         }
                         return true;
                     }
+                } else if leaderinfo.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -593,14 +693,26 @@ impl<S : BaseSender<Message>> Node<S> {
         loop {
             let msg_option = self.receive_timeout(Duration::from_millis(PH2_TIMEOUT_MS));
             if let Some(msg) = msg_option {
-                if let MessageType::Ack(zxid) = msg.msg_type {
+                if let MessageType::FollowerInfo(_fepoch, _) = msg.msg_type {
+                    // sends LEADERINFO(e) to all followers, where e is greater than all f.acceptedEpoch in the quorum
+                    let new_msg = Message {
+                        msg_type: MessageType::LeaderInfo(proposed_epoch),
+                        sender_id: self.id,
+                        epoch: 0,
+                    };
+                    self.send(msg.sender_id, new_msg);
+                } else if let MessageType::AckEpoch(follower_z, _follower_epoch) = msg.msg_type {
+                    self.sync_with_follower(msg.sender_id, follower_z, proposed_epoch);
+                } else if let MessageType::Ack(zxid) = msg.msg_type {
                     assert!(zxid == proposed_epoch << 32, "{} != {} << 32", zxid, proposed_epoch);
                     if acks.insert(msg.sender_id) {
                         last_recv = Instant::now();
                     }
-                    if acks.len() >= self.quorum_size as usize {
+                    if acks.len() >= (self.quorum_size - 1) as usize {
                         break;
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
             }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
@@ -652,8 +764,10 @@ impl<S : BaseSender<Message>> Node<S> {
                         self.send(msg.sender_id, ack_msg);
                         break;
                     }
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
-            };
+            }
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
                 // timeout when waiting for leader candidate response
                 return false;
@@ -667,6 +781,8 @@ impl<S : BaseSender<Message>> Node<S> {
             if let Some(msg) = msg_option {
                 if msg.sender_id == leader_id && msg.msg_type == MessageType::UpToDate {
                     break;
+                } else if msg.msg_type == MessageType::ReturnToMainloop {
+                    return false;
                 }
             };
             if last_recv.elapsed().as_millis() >= PH1_TIMEOUT_MS as u128 {
