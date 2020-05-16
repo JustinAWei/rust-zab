@@ -52,7 +52,7 @@ fn start_up_nodes(nnodes : u64, log_base : &String)
         running.insert(_node_id, r.clone());
         let handle = thread::spawn(move || {
             while r.load(Ordering::SeqCst) {
-                node.main_loop();
+                node.process();
                 if node.epoch > curr_e.load(Ordering::SeqCst) && Some(node.id) == node.leader {
                     println!("Epoch and leader advanced! {} {}", node.epoch, node.id);
                     curr_l.store(node.id, Ordering::SeqCst);
@@ -81,7 +81,7 @@ fn restart_node(oldnode : Node<UnreliableSender<Message>>,
     r.store(true, Ordering::SeqCst);
     let handle = thread::spawn(move || {
         while r.load(Ordering::SeqCst) {
-            node.main_loop();
+            node.process();
             if node.epoch > curr_e.load(Ordering::SeqCst) && Some(node.id) == node.leader {
                 curr_l.store(node.id, Ordering::SeqCst);
                 curr_e.store(node.epoch, Ordering::SeqCst);

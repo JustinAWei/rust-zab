@@ -493,7 +493,7 @@ impl<S : BaseSender<Message>> Node<S> {
         }
     }
 
-    pub fn main_loop(&mut self) {
+    pub fn process(&mut self) {
         match self.state {
             NodeState::Looking => {
                 let result = self.leader_elector.look_for_leader(
