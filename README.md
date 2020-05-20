@@ -1,2 +1,0 @@
-# zookeeper
-Rust implementation 
